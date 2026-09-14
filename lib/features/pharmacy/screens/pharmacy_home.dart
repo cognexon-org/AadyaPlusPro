@@ -1,15 +1,15 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:iconsax/iconsax.dart';
-import 'package:fl_chart/fl_chart.dart';
+import '../../../core/network/api_service.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/stat_card.dart';
-import '../../auth/providers/auth_provider.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
-import 'new_sale.dart';
+import '../providers/pharmacy_store_provider.dart';
+import 'pharmacy_procurement.dart';
+import 'pharmacy_inventory_ops.dart';
+import 'pharmacy_online_settings.dart';
 import 'prescription_queue.dart';
-import 'stock_alert.dart';
 
 class PharmacyHome extends ConsumerStatefulWidget {
   const PharmacyHome({super.key});
@@ -19,196 +19,189 @@ class PharmacyHome extends ConsumerStatefulWidget {
 }
 
 class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
+  final ApiService _api = ApiService();
+  Map<String, dynamic> _stats = const {};
+  List<Map<String, dynamic>> _sales = const [];
+  bool _loading = true;
+  String? _error;
+  String? _loadedStoreId;
+
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(pharmacyDashboardProvider.notifier).loadAll());
+    Future.microtask(() async {
+      await ref.read(pharmacyStoreProvider.notifier).initialize();
+      if (mounted) await _load();
+    });
   }
 
-  Future<void> _refresh() async {
-    await ref.read(pharmacyDashboardProvider.notifier).loadAll();
+  Future<void> _load() async {
+    final storeId = ref.read(pharmacyStoreProvider).selectedStoreId;
+    if (storeId == null) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final response = await _api.getPharmacyInventoryDashboard();
+      final data = _map(response.data);
+      if (!mounted) return;
+      setState(() {
+        _stats = _map(data['stats']);
+        _sales = _maps(data['recentSales']);
+        _loadedStoreId = storeId;
+        _loading = false;
+      });
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = _message(e);
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(authProvider).user;
-    final dashData = ref.watch(pharmacyDashboardProvider);
-    final profile = dashData.profile;
-
-    final stats = dashData.stats;
-
-    final appointmentsCount = dashData.medicines.length; // all medicines
-    final medicines = profile['totalMedicines'] ?? stats['totalMedicines'] ?? (appointmentsCount > 0 ? appointmentsCount.toString() : '--');
-    final revenue = stats['totalSales'] ?? profile['todayRevenue'] ?? profile['revenue'] ?? '--';
-    final lowStock = stats['lowStockCount'] ?? profile['lowStock'] ?? '--';
-    final salesCount = stats['salesCount'] ?? profile['totalOrders'] ?? '--';
+    final store = ref.watch(pharmacyStoreProvider);
+    if (store.selectedStoreId != null &&
+        store.selectedStoreId != _loadedStoreId &&
+        !_loading) {
+      Future.microtask(_load);
+    }
 
     return Scaffold(
       backgroundColor: AppTheme.surface,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _refresh,
-          color: AppTheme.accent,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+          onRefresh: _load,
+          child: ListView(
             padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Welcome back 👋', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
-                    const SizedBox(height: 4),
-                    Text(user?.name ?? 'Pharmacy', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-                  ])),
-                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-                    child: Badge(smallSize: 8, child: const Icon(Iconsax.notification, size: 22, color: AppTheme.textPrimary))),
-                ]),
-                const SizedBox(height: 24),
-
-                if (dashData.isLoading && profile.isEmpty)
-                  const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: AppTheme.accent)))
-                else ...[
-                  GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.3,
-                    children: [
-                      StatCard(title: 'Medicines', value: _fmt(medicines), icon: Iconsax.box, color: AppTheme.accent),
-                      StatCard(title: "Revenue", value: _fmtCurrency(revenue), icon: Iconsax.money_recive, color: AppTheme.primary),
-                      StatCard(title: 'Low Stock', value: _fmt(lowStock), icon: Iconsax.warning_2, color: AppTheme.warning),
-                      StatCard(title: 'Sales', value: _fmt(salesCount), icon: Iconsax.document_text, color: AppTheme.info),
-                    ]),
-                  const SizedBox(height: 20),
-
-                  // Chart
-                  Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                        Text('Weekly Overview', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                        Row(children: [_legend(AppTheme.accent, 'Sales'), const SizedBox(width: 12), _legend(AppTheme.primary, 'Prescriptions')]),
-                      ]),
-                      const SizedBox(height: 20),
-                      SizedBox(height: 180, child: BarChart(BarChartData(alignment: BarChartAlignment.spaceAround, maxY: 50000,
-                        titlesData: FlTitlesData(
-                          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, _) {
-                            const d = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                            return Padding(padding: const EdgeInsets.only(top: 8), child: Text(d[v.toInt()], style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)));
-                          }, reservedSize: 28)),
-                          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        ),
-                        gridData: const FlGridData(show: false), borderData: FlBorderData(show: false),
-                        barGroups: _buildWeeklyBars(profile),
-                      ))),
-                    ])),
-                  const SizedBox(height: 20),
-
-                  // Quick Actions
-                  Text('Quick Actions', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                  const SizedBox(height: 12),
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 2.2,
-                    children: [
-                      _qa(Iconsax.bag_2, 'New Sale', AppTheme.pharmacyGradient, true, () {
-                        Navigator.push(context, MaterialPageRoute(builder: (c) => const NewSaleScreen()));
-                      }),
-                      _qa2(Iconsax.document_text, 'Prescriptions', AppTheme.primary, () {
-                        Navigator.push(context, MaterialPageRoute(builder: (c) => const PrescriptionQueue()));
-                      }),
-                      _qa2(Iconsax.warning_2, 'Stock Alert', AppTheme.warning, () {
-                        Navigator.push(context, MaterialPageRoute(builder: (c) => const StockAlertScreen()));
-                      }),
-                      _qa2(Iconsax.truck, 'Place Order', AppTheme.success, () {}),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Verification status
-                  if (profile['verificationStatus'] != null)
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: profile['verificationStatus'] == 'approved' ? AppTheme.success.withValues(alpha: 0.06) : AppTheme.warning.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: (profile['verificationStatus'] == 'approved' ? AppTheme.success : AppTheme.warning).withValues(alpha: 0.2)),
-                      ),
-                      child: Row(children: [
-                        Icon(profile['verificationStatus'] == 'approved' ? Iconsax.verify5 : Iconsax.clock, size: 20,
-                          color: profile['verificationStatus'] == 'approved' ? AppTheme.success : AppTheme.warning),
-                        const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Pharmacy Status', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                          Text(profile['verificationStatus'] == 'approved' ? 'Your pharmacy is verified and active' : 'Verification pending - admin review in progress',
-                            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
-                        ])),
-                      ]),
-                    ),
-                ],
+            children: [
+              Text('Pharmacy ERP', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+              const SizedBox(height: 4),
+              Text('Branch-scoped inventory, procurement and online fulfillment', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+              const SizedBox(height: 14),
+              const PharmacyStoreSelector(),
+              if (store.error != null) ...[
+                const SizedBox(height: 8),
+                Text(store.error!, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.error)),
               ],
-            ),
+              const SizedBox(height: 16),
+              if (_loading)
+                const LinearProgressIndicator()
+              else if (_error != null)
+                _errorCard(_error!)
+              else ...[
+                Row(children: [
+                  Expanded(child: _stat('Today revenue', '₹${_money(_stats['todayRevenue'])}', Iconsax.money_recive, AppTheme.success)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _stat('Gross profit', '₹${_money(_stats['todayGrossProfit'])}', Iconsax.chart_2, AppTheme.primary)),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: _stat('Low stock', '${_stats['lowStock'] ?? 0}', Iconsax.warning_2, AppTheme.warning)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _stat('Pending POs', '${_stats['pendingOrders'] ?? 0}', Iconsax.document_text, AppTheme.accent)),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: _stat('Inventory cost', '₹${_money(_stats['inventoryCostValue'])}', Iconsax.box, AppTheme.textSecondary)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _stat('Retail value', '₹${_money(_stats['inventoryRetailValue'])}', Iconsax.tag, AppTheme.pharmacyAccent)),
+                ]),
+              ],
+              const SizedBox(height: 22),
+              Text('Operations', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+              const SizedBox(height: 10),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 1.65,
+                children: [
+                  _action('Procurement & GRN', Iconsax.receipt_item, () => _open(const PharmacyProcurement())),
+                  _action('Transfers & Returns', Iconsax.arrange_circle, () => _open(const PharmacyInventoryOps())),
+                  _action('Prescription Queue', Iconsax.note_2, () => _open(const PrescriptionQueue())),
+                  _action('Online Store', Iconsax.shop, () => _open(const PharmacyOnlineSettings())),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('Recent POS sales', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                Text('${_stats['todayTransactions'] ?? 0} today', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+              ]),
+              const SizedBox(height: 10),
+              if (_sales.isEmpty)
+                _empty('No sales in this branch yet')
+              else
+                ..._sales.take(6).map((sale) => _saleTile(sale)),
+            ],
           ),
         ),
       ),
     );
   }
 
-  List<BarChartGroupData> _buildWeeklyBars(Map<String, dynamic> profile) {
-    final weekly = profile['weeklySales'] ?? profile['weekly'];
-    if (weekly is List && weekly.length >= 7) {
-      return List.generate(7, (i) {
-        final sales = (weekly[i] is Map ? weekly[i]['sales'] ?? 0 : weekly[i]) as num;
-        final presc = (weekly[i] is Map ? weekly[i]['prescriptions'] ?? 0 : 0) as num;
-        return BarChartGroupData(x: i, barRods: [
-          BarChartRodData(toY: sales.toDouble(), color: AppTheme.accent, width: 10, borderRadius: const BorderRadius.vertical(top: Radius.circular(4))),
-          BarChartRodData(toY: presc.toDouble(), color: AppTheme.primary, width: 10, borderRadius: const BorderRadius.vertical(top: Radius.circular(4))),
-        ]);
-      });
-    }
-    return List.generate(7, (i) => BarChartGroupData(x: i, barRods: [
-      BarChartRodData(toY: 0, color: AppTheme.accent.withValues(alpha: 0.3), width: 10, borderRadius: const BorderRadius.vertical(top: Radius.circular(4))),
-      BarChartRodData(toY: 0, color: AppTheme.primary.withValues(alpha: 0.3), width: 10, borderRadius: const BorderRadius.vertical(top: Radius.circular(4))),
-    ]));
+  Widget _stat(String title, String value, IconData icon, Color color) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
+        child: Row(children: [
+          Container(width: 36, height: 36, decoration: BoxDecoration(color: color.withValues(alpha: .10), borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 18, color: color)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.plusJakartaSans(fontSize: 10, color: AppTheme.textSecondary)),
+            const SizedBox(height: 3),
+            Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+          ])),
+        ]),
+      );
+
+  Widget _action(String label, IconData icon, VoidCallback onTap) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
+          child: Row(children: [
+            Container(width: 38, height: 38, decoration: BoxDecoration(gradient: AppTheme.pharmacyGradient, borderRadius: BorderRadius.circular(11)), child: Icon(icon, size: 19, color: Colors.white)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.textPrimary))),
+          ]),
+        ),
+      );
+
+  Widget _saleTile(Map<String, dynamic> sale) => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
+        child: Row(children: [
+          const Icon(Iconsax.receipt_2, size: 18, color: AppTheme.pharmacyAccent),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(sale['invoiceNumber']?.toString() ?? sale['saleNumber']?.toString() ?? 'Sale', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700)),
+            Text(sale['customerName']?.toString() ?? 'Customer', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+          ])),
+          Text('₹${_money((sale['totalAmount'] ?? 0) - (sale['returnedAmount'] ?? 0))}', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.success)),
+        ]),
+      );
+
+  Widget _errorCard(String text) => Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: AppTheme.error.withValues(alpha: .06), borderRadius: BorderRadius.circular(12)), child: Text(text, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.error)));
+  Widget _empty(String text) => Container(padding: const EdgeInsets.all(22), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)), child: Center(child: Text(text, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary))));
+
+  Future<void> _open(Widget page) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    if (mounted) await _load();
   }
 
-  Widget _legend(Color c, String l) => Row(children: [
-    Container(width: 10, height: 10, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3))),
-    const SizedBox(width: 6), Text(l, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary))]);
-
-  Widget _qa(IconData i, String l, LinearGradient g, bool grad, VoidCallback onTap) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.all(12), decoration: BoxDecoration(gradient: g, borderRadius: BorderRadius.circular(14)),
-      child: Row(children: [
-        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-          child: Icon(i, size: 18, color: Colors.white)),
-        const SizedBox(width: 10),
-        Text(l, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-      ])),
-  );
-
-  Widget _qa2(IconData i, String l, Color c, VoidCallback onTap) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: c.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14), border: Border.all(color: c.withValues(alpha: 0.15))),
-      child: Row(children: [
-        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: c.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
-          child: Icon(i, size: 18, color: c)),
-        const SizedBox(width: 10),
-        Expanded(child: Text(l, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: c))),
-      ])),
-  );
-
-  String _fmt(dynamic v) => v is num ? v.toStringAsFixed(0) : v?.toString() ?? '--';
-  String _fmtCurrency(dynamic v) {
-    if (v is num) {
-      if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(1)}L';
-      if (v >= 1000) return '₹${(v / 1000).toStringAsFixed(0)}K';
-      return '₹${v.toStringAsFixed(0)}';
-    }
-    return v?.toString() ?? '₹0';
+  static Map<String, dynamic> _map(dynamic value) => value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+  static List<Map<String, dynamic>> _maps(dynamic value) => value is List ? value.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : <Map<String, dynamic>>[];
+  static String _money(dynamic value) => (num.tryParse(value?.toString() ?? '') ?? 0).toStringAsFixed(0);
+  static String _message(DioException e) {
+    final d = e.response?.data;
+    if (d is Map) return d['message']?.toString() ?? d['error']?.toString() ?? 'Request failed';
+    return e.message ?? 'Request failed';
   }
 }

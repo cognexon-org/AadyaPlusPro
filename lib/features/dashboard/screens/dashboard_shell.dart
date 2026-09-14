@@ -30,6 +30,7 @@ import '../../pharmacy/screens/pharmacy_orders.dart';
 import '../../pharmacy/screens/pharmacy_medicines.dart';
 import '../../pharmacy/screens/pharmacy_earnings.dart';
 import '../../pharmacy/screens/pharmacy_profile.dart';
+import '../../pharmacy/providers/pharmacy_store_provider.dart';
 
 class DashboardShell extends ConsumerStatefulWidget {
   const DashboardShell({super.key});
@@ -135,6 +136,10 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     final pages = _getPages(role);
     final navItems = _getNavItems(role);
     final roleColor = _getRoleColor(role);
+
+    if (role == UserRole.pharmacy) {
+      Future.microtask(() => ref.read(pharmacyStoreProvider.notifier).initialize());
+    }
 
     return Scaffold(
       body: IndexedStack(
