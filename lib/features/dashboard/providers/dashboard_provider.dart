@@ -318,20 +318,6 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
     }
   }
 
-  Future<void> loadExercises() async {
-    try {
-      // The remote backend does not have the /physio/exercises route yet.
-      // Mocking the exercise library to prevent HTTP 400 'Invalid physiotherapist id'
-      await Future.delayed(const Duration(milliseconds: 300));
-      final mockData = [
-        {'_id': '1', 'name': 'Squats', 'category': 'Strength Training', 'difficulty': 'Beginner', 'sets': 3, 'reps': 12, 'description': 'Basic lower body exercise'},
-        {'_id': '2', 'name': 'Lunges', 'category': 'Balance', 'difficulty': 'Intermediate', 'sets': 3, 'reps': 10, 'description': 'Improves balance and leg strength'},
-        {'_id': '3', 'name': 'Plank', 'category': 'Core', 'difficulty': 'Beginner', 'sets': 3, 'reps': 1, 'description': 'Static core exercise'},
-        {'_id': '4', 'name': 'Pelvic Tilts', 'category': 'Rehabilitation', 'difficulty': 'Beginner', 'sets': 3, 'reps': 15, 'description': 'Great for lower back pain'},
-      ];
-      state = state.copyWith(medicines: mockData); // Reuse medicines field for exercises
-    } catch (_) {}
-  }
 
   Future<void> loadAll() async {
     state = state.copyWith(isLoading: true, error: null);
@@ -341,7 +327,6 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
       await loadPatients();
       await loadEarnings();
       await loadProfile();
-      await loadExercises();
     } catch (e) {
       state = state.copyWith(error: e.toString());
     } finally {

@@ -142,11 +142,7 @@ class ApiService {
   Future<Response> getPhysioEarningsReport({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.physioEarningsReport, queryParameters: queryParams);
   Future<Response> updatePhysioAvailability(dynamic data) => _dio.put(ApiConstants.physioAvailability, data: data);
   Future<Response> addPhysioBreak(Map<String, dynamic> data) => _dio.post(ApiConstants.physioBreak, data: data);
-  Future<Response> getPhysioExercises({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.physioExercises, queryParameters: queryParams);
   Future<Response> getPhysioPatientById(String id) => _dio.get(ApiConstants.physioPatientById(id));
-  Future<Response> createPhysioExercise(Map<String, dynamic> data) => _dio.post(ApiConstants.physioExercises, data: data);
-  Future<Response> updatePhysioExercise(String id, Map<String, dynamic> data) => _dio.put(ApiConstants.physioExerciseById(id), data: data);
-  Future<Response> deletePhysioExercise(String id) => _dio.delete(ApiConstants.physioExerciseById(id));
 
   // PATHOLOGY COMPATIBILITY
   Future<Response> getPathologyProfile() => _dio.get(ApiConstants.pathologyProfile);
@@ -340,6 +336,8 @@ class ApiService {
   Future<Response> markNotificationRead(String id) => _dio.put(ApiConstants.notificationRead(id));
   Future<Response> markAllNotificationsRead() => _dio.put(ApiConstants.notificationsReadAll);
   Future<Response> deleteNotification(String id) => _dio.delete(ApiConstants.notificationById(id));
+  Future<Response> registerDeviceToken(Map<String, dynamic> data) => _dio.post(ApiConstants.notificationsDeviceToken, data: data);
+  Future<Response> unregisterDeviceToken(Map<String, dynamic> data) => _dio.delete(ApiConstants.notificationsDeviceToken, data: data);
 
   // SHARED
   Future<Response> getAvailableSlots({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.calendarSlots, queryParameters: queryParams);

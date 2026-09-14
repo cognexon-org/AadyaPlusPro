@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'core/notifications/professional_notification_navigation_service.dart';
+import 'core/notifications/professional_push_notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_provider.dart';
-import 'features/auth/screens/splash_screen.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/screens/register_screen.dart';
-import 'features/onboarding/screens/pending_approval_screen.dart';
+import 'features/auth/screens/splash_screen.dart';
 import 'features/dashboard/screens/dashboard_shell.dart';
+import 'features/onboarding/screens/pending_approval_screen.dart';
 
-final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
-
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -19,6 +20,12 @@ void main() {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+
+  // Push initialization is best-effort. A missing Firebase project must never
+  // block doctors, pharmacies, diagnostics teams or field-force users from
+  // opening the app.
+  await ProfessionalPushNotificationService.instance.initialize();
+
   runApp(const ProviderScope(child: AadyaProfessionalApp()));
 }
 
@@ -28,15 +35,19 @@ class AadyaProfessionalApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen<AuthState>(authProvider, (previous, next) {
-      final lostSession = previous?.isAuthenticated == true && !next.isAuthenticated;
+      final lostSession =
+          previous?.isAuthenticated == true && !next.isAuthenticated;
       if (!lostSession) return;
+      ProfessionalNotificationNavigationService.instance
+          .setAuthenticatedReady(false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        appNavigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+        ProfessionalNotificationNavigationService.navigatorKey.currentState
+            ?.pushNamedAndRemoveUntil('/login', (route) => false);
       });
     });
 
     return MaterialApp(
-      navigatorKey: appNavigatorKey,
+      navigatorKey: ProfessionalNotificationNavigationService.navigatorKey,
       title: 'Aadya Plus Professional',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,

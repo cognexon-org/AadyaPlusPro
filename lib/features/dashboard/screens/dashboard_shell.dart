@@ -39,6 +39,8 @@ import '../../mr/screens/mr_team.dart';
 import '../../mr/screens/mr_profile.dart';
 import '../../notifications/providers/notification_provider.dart';
 import '../../notifications/widgets/notification_bell.dart';
+import '../../../core/notifications/professional_notification_navigation_service.dart';
+import '../../../core/notifications/professional_push_notification_service.dart';
 
 class DashboardShell extends ConsumerStatefulWidget {
   const DashboardShell({super.key});
@@ -50,20 +52,39 @@ class DashboardShell extends ConsumerStatefulWidget {
 class _DashboardShellState extends ConsumerState<DashboardShell> {
   int _currentIndex = 0;
   Timer? _notificationTimer;
+  StreamSubscription<int>? _pushNotificationSubscription;
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(professionalNotificationProvider.notifier).refresh(silent: true));
+    ProfessionalNotificationNavigationService.instance.setAuthenticatedReady(true);
+    Future.microtask(() async {
+      await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+      await ref
+          .read(professionalNotificationProvider.notifier)
+          .refresh(silent: true);
+    });
+    _pushNotificationSubscription = ProfessionalPushNotificationService
+        .instance.notificationEvents
+        .listen((_) {
+      if (!mounted) return;
+      ref
+          .read(professionalNotificationProvider.notifier)
+          .refresh(silent: true);
+    });
     _notificationTimer = Timer.periodic(
       const Duration(seconds: 60),
-      (_) => ref.read(professionalNotificationProvider.notifier).refresh(silent: true),
+      (_) => ref
+          .read(professionalNotificationProvider.notifier)
+          .refresh(silent: true),
     );
   }
 
   @override
   void dispose() {
     _notificationTimer?.cancel();
+    _pushNotificationSubscription?.cancel();
+    ProfessionalNotificationNavigationService.instance.setAuthenticatedReady(false);
     super.dispose();
   }
 

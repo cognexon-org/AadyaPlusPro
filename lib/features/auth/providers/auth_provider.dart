@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import '../models/user_model.dart';
 import '../../../core/network/api_service.dart';
 import '../../../core/network/token_storage.dart';
+import '../../../core/notifications/professional_push_notification_service.dart';
 
 // Auth state
 class AuthState {
@@ -60,6 +61,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
     return 'This account role is not supported by AadyaPlus Professional.';
   }
 
+  Map<String, dynamic> _userPayload(dynamic responseData) {
+    if (responseData is! Map) return <String, dynamic>{};
+    final raw = responseData['user'] ?? responseData['data'] ?? responseData;
+    if (raw is! Map) return <String, dynamic>{};
+    final user = Map<String, dynamic>.from(raw);
+    final profile = responseData['profile'];
+    if (profile is Map && profile['verificationStatus'] != null) {
+      user['verificationStatus'] = profile['verificationStatus'];
+    }
+    return user;
+  }
+
   void setLoading(bool loading) {
     state = state.copyWith(isLoading: loading);
   }
@@ -91,18 +104,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final data = response.data;
 
       if (data != null && (data['success'] == true || data['user'] != null || data['data'] != null)) {
-        final userData = data['user'] ?? data['data'] ?? data;
-        if (userData is! Map || !_isSupportedProfessionalRole(userData['role'])) {
+        final userData = _userPayload(data);
+        if (userData.isEmpty || !_isSupportedProfessionalRole(userData['role'])) {
           await TokenStorage.clearAll();
-          setError(_unsupportedRoleMessage(userData is Map ? userData['role'] : null));
+          setError(_unsupportedRoleMessage(userData['role']));
           return false;
         }
         final token = await TokenStorage.getToken();
-        final user = UserModel.fromJson(Map<String, dynamic>.from(userData), token: token);
+        final user = UserModel.fromJson(userData, token: token);
         
         // Persist user data
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user);
+        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
         return true;
       }
     } on DioException catch (e) {
@@ -125,6 +139,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         }
         final user = UserModel.fromJson(Map<String, dynamic>.from(decoded));
         setUser(user);
+        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
         return true;
       }
     } catch (_) {}
@@ -152,20 +167,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
         setError(data['message'] ?? 'Login failed: no token received');
         return false;
       }
-      final rawUser = data['user'] ?? data['data'] ?? data;
-      if (rawUser is! Map || !_isSupportedProfessionalRole(rawUser['role'])) {
+      final rawUser = _userPayload(data);
+      if (rawUser.isEmpty || !_isSupportedProfessionalRole(rawUser['role'])) {
         await TokenStorage.clearAll();
-        setError(_unsupportedRoleMessage(rawUser is Map ? rawUser['role'] : null));
+        setError(_unsupportedRoleMessage(rawUser['role']));
         return false;
       }
 
       await TokenStorage.saveToken(token);
-      final user = UserModel.fromJson(Map<String, dynamic>.from(rawUser), token: token);
+      final user = UserModel.fromJson(rawUser, token: token);
       
       // Persist user data
       await TokenStorage.saveUserData(jsonEncode(user.toJson()));
       
       setUser(user.copyWith(token: token));
+      await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
       return true;
     } on DioException catch (e) {
       final message = _extractErrorMessage(e);
@@ -211,6 +227,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         final user = UserModel.fromLoginResponse(data);
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user.copyWith(token: token));
+        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
       } else {
         // Registration succeeded but need to login separately
         state = state.copyWith(isLoading: false);
@@ -235,11 +252,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
       
       // Re-fetch the user to get updated profileCompleted status
       final meResponse = await _api.getCurrentUser();
-      final userData = meResponse.data['user'] ?? meResponse.data['data'] ?? meResponse.data;
+      final userData = _userPayload(meResponse.data);
       final token = await TokenStorage.getToken();
       final updatedUser = UserModel.fromJson(userData, token: token);
       await TokenStorage.saveUserData(jsonEncode(updatedUser.toJson()));
       setUser(updatedUser);
+      await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
 
       return true;
     } on DioException catch (e) {
@@ -253,6 +271,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Logout and clear all stored data
   Future<void> logout() async {
+    await ProfessionalPushNotificationService.instance.unregisterAuthenticatedDevice();
     try {
       await _api.dio.post('/auth/logout');
     } catch (_) {

@@ -270,8 +270,6 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
     try {
       final res = await _api.getOrCreateChatSession({
         'patientId': patientId,
-        'professionalId': profId,
-        'professionalType': 'physio',
         'appointmentId': apt['_id'], // Pass the specific appointment ID
       });
 

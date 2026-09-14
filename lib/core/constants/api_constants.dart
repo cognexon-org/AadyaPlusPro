@@ -68,8 +68,6 @@ class ApiConstants {
   static const physioEarningsReport = '/physio/me/earnings/report';
   static const physioAvailability = '/physio/me/availability';
   static const physioBreak = '/physio/me/break';
-  static const physioExercises = '/physio/exercises';
-  static String physioExerciseById(String id) => '/physio/exercises/$id';
 
   // PATHOLOGY COMPATIBILITY
   static const pathologyProfile = '/pathology/me/profile';
@@ -205,4 +203,5 @@ class ApiConstants {
   static String notificationRead(String id) => '/notifications/$id/read';
   static const notificationsReadAll = '/notifications/read-all';
   static String notificationById(String id) => '/notifications/$id';
+  static const notificationsDeviceToken = '/notifications/device-token';
 }

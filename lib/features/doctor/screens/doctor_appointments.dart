@@ -377,8 +377,6 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
     try {
       final res = await _api.getOrCreateChatSession({
         'patientId': patientId,
-        'professionalId': profId,
-        'professionalType': 'doctor', 
         if (appointmentId.isNotEmpty) 'appointmentId': appointmentId,
       });
 

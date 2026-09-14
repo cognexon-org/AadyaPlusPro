@@ -40,12 +40,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _stateController = TextEditingController();
   final _pincodeController = TextEditingController();
   final _aboutController = TextEditingController();
+  final _consultationFeeController = TextEditingController();
+  final _homeVisitFeeController = TextEditingController();
 
-  // Step 4: Documents
-  bool _licenseCertUploaded = false;
-  bool _idProofUploaded = false;
-  bool _degreeCertUploaded = false;
-
+  // Step 4: Review and submit
   bool _termsAccepted = false;
 
   @override
@@ -64,6 +62,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     _stateController.dispose();
     _pincodeController.dispose();
     _aboutController.dispose();
+    _consultationFeeController.dispose();
+    _homeVisitFeeController.dispose();
     super.dispose();
   }
 
@@ -97,15 +97,16 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     final phone = _phoneController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty) {
+    final validationError = _registrationValidationError();
+    if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all required fields'), backgroundColor: Colors.red),
+        SnackBar(content: Text(validationError), backgroundColor: Colors.red),
       );
       return;
     }
 
     final authNotifier = ref.read(authProvider.notifier);
-    final success = await authNotifier.register(
+    final registered = await authNotifier.register(
       name: name,
       email: email,
       phone: phone,
@@ -114,24 +115,158 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     );
 
     if (!mounted) return;
-
-    if (success) {
-      // If registration returns a token, user is logged in
-      final user = ref.read(authProvider).user;
-      if (user != null) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/pending', (r) => false);
-      } else {
-        // Need to login after registration
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration successful! Please log in.'), backgroundColor: Colors.green),
-        );
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-      }
-    } else {
+    if (!registered) {
       final error = ref.read(authProvider).error;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error ?? 'Registration failed'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(error ?? 'Registration failed'),
+          backgroundColor: Colors.red,
+        ),
       );
+      return;
+    }
+
+    // The current backend returns a JWT on successful registration. Complete
+    // the actual role profile immediately instead of discarding the fields
+    // collected by this wizard.
+    final user = ref.read(authProvider).user;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registration successful. Please sign in to complete your profile.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
+      return;
+    }
+
+    final profileCompleted =
+        await authNotifier.completeProfile(_buildProfessionalProfilePayload());
+    if (!mounted) return;
+
+    if (!profileCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ref.read(authProvider).error ??
+                'Account created, but professional profile submission failed.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).pushNamedAndRemoveUntil('/pending', (r) => false);
+  }
+
+  String? _registrationValidationError() {
+    if (_nameController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty ||
+        _phoneController.text.trim().isEmpty ||
+        _passwordController.text.trim().isEmpty) {
+      return 'Please fill in all required account fields.';
+    }
+    if (_licenseController.text.trim().isEmpty) {
+      return 'License / registration number is required.';
+    }
+    if ((_selectedRole == UserRole.doctor ||
+            _selectedRole == UserRole.physiotherapist) &&
+        _specializationController.text.trim().isEmpty) {
+      return 'Specialization is required.';
+    }
+    if (_selectedRole == UserRole.doctor ||
+        _selectedRole == UserRole.physiotherapist) {
+      final consultationFee =
+          num.tryParse(_consultationFeeController.text.trim());
+      if (consultationFee == null || consultationFee <= 0) {
+        return 'Enter a valid consultation fee.';
+      }
+    }
+    if (_selectedRole == UserRole.physiotherapist) {
+      final homeVisitFee = num.tryParse(_homeVisitFeeController.text.trim());
+      if (homeVisitFee == null || homeVisitFee <= 0) {
+        return 'Enter a valid home-visit fee.';
+      }
+    }
+    if ((_selectedRole == UserRole.pathology ||
+            _selectedRole == UserRole.pharmacy) &&
+        _clinicNameController.text.trim().isEmpty) {
+      return _selectedRole == UserRole.pathology
+          ? 'Lab name is required.'
+          : 'Pharmacy name is required.';
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _buildProfessionalProfilePayload() {
+    final role = _selectedRole!;
+    final address = <String, dynamic>{
+      'street': _addressController.text.trim(),
+      'address': _addressController.text.trim(),
+      'city': _cityController.text.trim(),
+      'state': _stateController.text.trim(),
+      'pincode': _pincodeController.text.trim(),
+    };
+    final specialization = _specializationController.text
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    final experienceYears =
+        int.tryParse(_experienceController.text.trim()) ?? 0;
+    final consultationFee =
+        num.tryParse(_consultationFeeController.text.trim()) ?? 0;
+    final homeVisitFee =
+        num.tryParse(_homeVisitFeeController.text.trim()) ?? 0;
+
+    switch (role) {
+      case UserRole.doctor:
+        return {
+          'name': _nameController.text.trim(),
+          if (_gender.isNotEmpty) 'gender': _gender.toLowerCase(),
+          if (_dob != null) 'dateOfBirth': _dob!.toIso8601String(),
+          'specialization': specialization,
+          'experienceYears': experienceYears,
+          'licenseNumber': _licenseController.text.trim(),
+          'clinicName': _clinicNameController.text.trim(),
+          'clinicAddress': address,
+          'consultationFee': consultationFee,
+          'homeVisitFee': homeVisitFee,
+          'about': _aboutController.text.trim(),
+        };
+      case UserRole.physiotherapist:
+        return {
+          'name': _nameController.text.trim(),
+          if (_gender.isNotEmpty) 'gender': _gender.toLowerCase(),
+          if (_dob != null) 'dateOfBirth': _dob!.toIso8601String(),
+          'specialization': specialization,
+          'experienceYears': experienceYears,
+          'licenseNumber': _licenseController.text.trim(),
+          'clinicAddress': address,
+          'consultationFee': consultationFee,
+          'homeVisitFee': homeVisitFee,
+          'about': _aboutController.text.trim(),
+        };
+      case UserRole.pathology:
+        return {
+          'labName': _clinicNameController.text.trim(),
+          'registrationNumber': _licenseController.text.trim(),
+          'address': address,
+          'contactPerson': _nameController.text.trim(),
+        };
+      case UserRole.pharmacy:
+        return {
+          'pharmacyName': _clinicNameController.text.trim(),
+          'licenseNumber': _licenseController.text.trim(),
+          'address': address,
+          'contactPerson': _nameController.text.trim(),
+        };
+      case UserRole.mr:
+        // MR users are manager/admin provisioned and are not offered in this
+        // public registration wizard.
+        return const <String, dynamic>{};
     }
   }
 
@@ -251,7 +386,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       case 2:
         return 'Professional Details';
       case 3:
-        return 'Documents & Submit';
+        return 'Review & Submit';
       default:
         return '';
     }
@@ -601,6 +736,38 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             const SizedBox(height: 16),
           ],
 
+          if (_selectedRole == UserRole.doctor || _selectedRole == UserRole.physiotherapist) ...[
+            _buildLabel('Consultation Fee (INR)'),
+            TextField(
+              controller: _consultationFeeController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                hintText: 'e.g., 500',
+                prefixIcon: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14),
+                  child: Icon(Iconsax.wallet_2, size: 20, color: AppTheme.primary),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          if (_selectedRole == UserRole.physiotherapist) ...[
+            _buildLabel('Home Visit Fee (INR)'),
+            TextField(
+              controller: _homeVisitFeeController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                hintText: 'e.g., 800',
+                prefixIcon: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14),
+                  child: Icon(Iconsax.home_2, size: 20, color: AppTheme.primary),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           _buildLabel(_selectedRole == UserRole.pathology
               ? 'Lab Name'
               : _selectedRole == UserRole.pharmacy
@@ -701,45 +868,39 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     );
   }
 
-  // Step 4: Documents & Submit
+  // Step 4: Review & Submit
   Widget _buildDocumentsAndSubmit() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Upload your documents for verification',
-            style: GoogleFonts.plusJakartaSans(fontSize: 15, color: AppTheme.textSecondary),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Iconsax.shield_tick, color: AppTheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Your license number and professional details will be submitted for verification. '
+                    'The verification team may request supporting identity or qualification documents before approval.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 24),
-
-          _buildDocumentUploadCard(
-            'Medical License / Registration Certificate',
-            'Upload your valid medical registration',
-            Iconsax.document_text,
-            _licenseCertUploaded,
-            () => setState(() => _licenseCertUploaded = true),
-          ),
-          const SizedBox(height: 12),
-
-          _buildDocumentUploadCard(
-            'ID Proof (Aadhaar / PAN)',
-            'Upload government-issued photo ID',
-            Iconsax.personalcard,
-            _idProofUploaded,
-            () => setState(() => _idProofUploaded = true),
-          ),
-          const SizedBox(height: 12),
-
-          _buildDocumentUploadCard(
-            'Degree / Qualification Certificate',
-            'Upload your educational certificates',
-            Iconsax.teacher,
-            _degreeCertUploaded,
-            () => setState(() => _degreeCertUploaded = true),
-          ),
-
           const SizedBox(height: 24),
 
           // Review Summary Card
@@ -842,76 +1003,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           ),
           const SizedBox(height: 16),
         ],
-      ),
-    );
-  }
-
-  Widget _buildDocumentUploadCard(
-    String title,
-    String subtitle,
-    IconData icon,
-    bool uploaded,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: uploaded ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: uploaded ? AppTheme.success.withValues(alpha: 0.05) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: uploaded ? AppTheme.success.withValues(alpha: 0.3) : AppTheme.border,
-            style: uploaded ? BorderStyle.solid : BorderStyle.solid,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: uploaded
-                    ? AppTheme.success.withValues(alpha: 0.1)
-                    : AppTheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                uploaded ? Iconsax.tick_circle : icon,
-                size: 22,
-                color: uploaded ? AppTheme.success : AppTheme.primary,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    uploaded ? 'Uploaded successfully' : subtitle,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 12,
-                      color: uploaded ? AppTheme.success : AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              uploaded ? Iconsax.tick_circle5 : Iconsax.document_upload,
-              size: 22,
-              color: uploaded ? AppTheme.success : AppTheme.textTertiary,
-            ),
-          ],
-        ),
       ),
     );
   }

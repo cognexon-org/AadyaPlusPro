@@ -144,8 +144,6 @@ class _PhysioAppointmentDetailsState extends ConsumerState<PhysioAppointmentDeta
     try {
       final res = await _api.getOrCreateChatSession({
         'patientId': patientId,
-        'professionalId': profId,
-        'professionalType': 'physio', 
         if (appointmentId.isNotEmpty) 'appointmentId': appointmentId,
       });
 
