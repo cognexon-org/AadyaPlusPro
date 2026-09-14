@@ -161,6 +161,35 @@ class ApiConstants {
   static String prescriptionCancel(String id) => '/prescription/$id/cancel';
   static String prescriptionPdf(String id) => '/prescription/$id/pdf';
 
+
+  // P3 MR / FIELD FORCE
+  static const mrMe = '/mr/me';
+  static const mrDashboard = '/mr/dashboard';
+  static const mrAnalytics = '/mr/analytics';
+  static const mrHierarchy = '/mr/hierarchy';
+  static const mrTeam = '/mr/team';
+  static const mrTerritories = '/mr/territories';
+  static const mrAccounts = '/mr/accounts';
+  static const mrVisits = '/mr/visits';
+  static String mrVisitCheckIn(String id) => '/mr/visits/$id/check-in';
+  static String mrVisitCheckOut(String id) => '/mr/visits/$id/check-out';
+  static String mrVisitSubmit(String id) => '/mr/visits/$id/submit';
+  static String mrVisitReview(String id) => '/mr/visits/$id/review';
+  static const mrAttendance = '/mr/attendance';
+  static const mrPunchIn = '/mr/attendance/punch-in';
+  static const mrPunchOut = '/mr/attendance/punch-out';
+  static const mrTourPlans = '/mr/tour-plans';
+  static String mrTourPlanSubmit(String id) => '/mr/tour-plans/$id/submit';
+  static String mrTourPlanReview(String id) => '/mr/tour-plans/$id/review';
+  static const mrExpenses = '/mr/expenses';
+  static String mrExpenseSubmit(String id) => '/mr/expenses/$id/submit';
+  static String mrExpenseReview(String id) => '/mr/expenses/$id/review';
+  static const mrTargets = '/mr/targets';
+  static const mrPob = '/mr/pob';
+  static String mrPobStatus(String id) => '/mr/pob/$id/status';
+  static const mrSamples = '/mr/samples';
+  static const mrDetailing = '/mr/detailing';
+
   // SHARED
   static const calendarSlots = '/calendar/available-slots';
   static const commission = '/commission';
@@ -173,4 +202,7 @@ class ApiConstants {
   static const upload = '/upload/profile';
   static const patients = '/patient';
   static const notifications = '/notifications';
+  static String notificationRead(String id) => '/notifications/$id/read';
+  static const notificationsReadAll = '/notifications/read-all';
+  static String notificationById(String id) => '/notifications/$id';
 }

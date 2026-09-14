@@ -3,6 +3,7 @@ enum UserRole {
   physiotherapist,
   pathology,
   pharmacy,
+  mr,
 }
 
 enum VerificationStatus {
@@ -140,6 +141,8 @@ class UserModel {
         return UserRole.pathology;
       case 'pharmacy':
         return UserRole.pharmacy;
+      case 'mr':
+        return UserRole.mr;
       default:
         return UserRole.doctor;
     }
@@ -155,6 +158,8 @@ class UserModel {
         return 'pathology';
       case UserRole.pharmacy:
         return 'pharmacy';
+      case UserRole.mr:
+        return 'mr';
     }
   }
 

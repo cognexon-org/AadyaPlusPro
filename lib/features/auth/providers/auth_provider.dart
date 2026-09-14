@@ -51,13 +51,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   bool _isSupportedProfessionalRole(dynamic rawRole) {
     final role = rawRole?.toString().toLowerCase() ?? '';
-    return const {'doctor', 'physio', 'physiotherapist', 'pathology', 'pharmacy'}.contains(role);
+    return const {'doctor', 'physio', 'physiotherapist', 'pathology', 'pharmacy', 'mr'}.contains(role);
   }
 
   String _unsupportedRoleMessage(dynamic rawRole) {
     final role = rawRole?.toString().toLowerCase() ?? '';
     if (role == 'patient') return 'Patient accounts must use the AadyaPlus patient app.';
-    if (role == 'mr') return 'The MR field-force mobile experience is enabled in Pro Patch P3.';
     return 'This account role is not supported by AadyaPlus Professional.';
   }
 
@@ -309,6 +308,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return 'HealthCare Diagnostics';
       case UserRole.pharmacy:
         return 'MedPlus Pharmacy';
+      case UserRole.mr:
+        return 'Field Representative';
     }
   }
 
@@ -322,6 +323,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return 'pathology';
       case UserRole.pharmacy:
         return 'pharmacy';
+      case UserRole.mr:
+        return 'mr';
     }
   }
 

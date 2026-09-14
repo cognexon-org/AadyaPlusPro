@@ -291,6 +291,56 @@ class ApiService {
   Future<Response> endConsultation(String appointmentId, Map<String, dynamic> data) => _dio.post(ApiConstants.consultationEnd(appointmentId), data: data);
   Future<Response> getConsultationHistory({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.consultationHistory, queryParameters: queryParams);
 
+
+  // P3 MR / FIELD FORCE
+  Future<Response> getMrMe() => _dio.get(ApiConstants.mrMe);
+  Future<Response> getMrDashboard({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrDashboard, queryParameters: queryParams);
+  Future<Response> getMrAnalytics({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrAnalytics, queryParameters: queryParams);
+  Future<Response> getMrHierarchy() => _dio.get(ApiConstants.mrHierarchy);
+  Future<Response> getMrTeam() => _dio.get(ApiConstants.mrTeam);
+  Future<Response> getMrTerritories({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrTerritories, queryParameters: queryParams);
+  Future<Response> getMrAccounts({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrAccounts, queryParameters: queryParams);
+  Future<Response> getMrVisits({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrVisits, queryParameters: queryParams);
+  Future<Response> createMrVisit(Map<String, dynamic> data) => _dio.post(ApiConstants.mrVisits, data: data);
+  Future<Response> mrVisitCheckIn(String id, Map<String, dynamic> data) => _dio.post(ApiConstants.mrVisitCheckIn(id), data: data);
+  Future<Response> mrVisitCheckOut(String id, Map<String, dynamic> data) => _dio.post(ApiConstants.mrVisitCheckOut(id), data: data);
+  Future<Response> mrVisitSubmit(String id, Map<String, dynamic> data) => _dio.post(ApiConstants.mrVisitSubmit(id), data: data);
+  Future<Response> mrVisitReview(String id, String decision, {String? comment}) => _dio.post(
+        ApiConstants.mrVisitReview(id),
+        data: {'decision': decision, if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim()},
+      );
+  Future<Response> getMrAttendance({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrAttendance, queryParameters: queryParams);
+  Future<Response> mrPunchIn(Map<String, dynamic> data) => _dio.post(ApiConstants.mrPunchIn, data: data);
+  Future<Response> mrPunchOut(Map<String, dynamic> data) => _dio.post(ApiConstants.mrPunchOut, data: data);
+  Future<Response> getMrTourPlans({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrTourPlans, queryParameters: queryParams);
+  Future<Response> saveMrTourPlan(Map<String, dynamic> data) => _dio.put(ApiConstants.mrTourPlans, data: data);
+  Future<Response> submitMrTourPlan(String id) => _dio.post(ApiConstants.mrTourPlanSubmit(id));
+  Future<Response> reviewMrTourPlan(String id, String decision, {String? comment}) => _dio.post(
+        ApiConstants.mrTourPlanReview(id),
+        data: {'decision': decision, if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim()},
+      );
+  Future<Response> getMrExpenses({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrExpenses, queryParameters: queryParams);
+  Future<Response> createMrExpense(Map<String, dynamic> data) => _dio.post(ApiConstants.mrExpenses, data: data);
+  Future<Response> submitMrExpense(String id) => _dio.post(ApiConstants.mrExpenseSubmit(id));
+  Future<Response> reviewMrExpense(String id, String decision, {String? comment}) => _dio.post(
+        ApiConstants.mrExpenseReview(id),
+        data: {'decision': decision, if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim()},
+      );
+  Future<Response> getMrTargets({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrTargets, queryParameters: queryParams);
+  Future<Response> setMrTarget(Map<String, dynamic> data) => _dio.put(ApiConstants.mrTargets, data: data);
+  Future<Response> getMrPob({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrPob, queryParameters: queryParams);
+  Future<Response> createMrPob(Map<String, dynamic> data) => _dio.post(ApiConstants.mrPob, data: data);
+  Future<Response> updateMrPobStatus(String id, String status) => _dio.patch(ApiConstants.mrPobStatus(id), data: {'status': status});
+  Future<Response> getMrSamples({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrSamples, queryParameters: queryParams);
+  Future<Response> createMrSampleTransaction(Map<String, dynamic> data) => _dio.post(ApiConstants.mrSamples, data: data);
+  Future<Response> getMrDetailing({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.mrDetailing, queryParameters: queryParams);
+
+  // P3 NOTIFICATIONS
+  Future<Response> getNotifications({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.notifications, queryParameters: queryParams);
+  Future<Response> markNotificationRead(String id) => _dio.put(ApiConstants.notificationRead(id));
+  Future<Response> markAllNotificationsRead() => _dio.put(ApiConstants.notificationsReadAll);
+  Future<Response> deleteNotification(String id) => _dio.delete(ApiConstants.notificationById(id));
+
   // SHARED
   Future<Response> getAvailableSlots({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.calendarSlots, queryParameters: queryParams);
   Future<Response> getCommissions({Map<String, dynamic>? queryParams}) => _dio.get(ApiConstants.commission, queryParameters: queryParams);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -31,6 +32,13 @@ import '../../pharmacy/screens/pharmacy_medicines.dart';
 import '../../pharmacy/screens/pharmacy_earnings.dart';
 import '../../pharmacy/screens/pharmacy_profile.dart';
 import '../../pharmacy/providers/pharmacy_store_provider.dart';
+import '../../mr/screens/mr_home.dart';
+import '../../mr/screens/mr_calls.dart';
+import '../../mr/screens/mr_work.dart';
+import '../../mr/screens/mr_team.dart';
+import '../../mr/screens/mr_profile.dart';
+import '../../notifications/providers/notification_provider.dart';
+import '../../notifications/widgets/notification_bell.dart';
 
 class DashboardShell extends ConsumerStatefulWidget {
   const DashboardShell({super.key});
@@ -41,6 +49,23 @@ class DashboardShell extends ConsumerStatefulWidget {
 
 class _DashboardShellState extends ConsumerState<DashboardShell> {
   int _currentIndex = 0;
+  Timer? _notificationTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => ref.read(professionalNotificationProvider.notifier).refresh(silent: true));
+    _notificationTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => ref.read(professionalNotificationProvider.notifier).refresh(silent: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    _notificationTimer?.cancel();
+    super.dispose();
+  }
 
   List<Widget> _getPages(UserRole role) {
     switch (role) {
@@ -75,6 +100,14 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
           PharmacyMedicines(),
           PharmacyEarnings(),
           PharmacyProfile(),
+        ];
+      case UserRole.mr:
+        return const [
+          MrHome(),
+          MrCalls(),
+          MrWork(),
+          MrTeam(),
+          MrProfile(),
         ];
     }
   }
@@ -113,6 +146,14 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
           BottomNavigationBarItem(icon: Icon(Iconsax.wallet_2), activeIcon: Icon(Iconsax.wallet_35), label: 'Earnings'),
           BottomNavigationBarItem(icon: Icon(Iconsax.profile_circle), activeIcon: Icon(Iconsax.profile_circle5), label: 'Profile'),
         ];
+      case UserRole.mr:
+        return const [
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.fact_check_outlined), activeIcon: Icon(Icons.fact_check), label: 'DCR'),
+          BottomNavigationBarItem(icon: Icon(Icons.route_outlined), activeIcon: Icon(Icons.route), label: 'Work'),
+          BottomNavigationBarItem(icon: Icon(Icons.groups_outlined), activeIcon: Icon(Icons.groups), label: 'Team'),
+          BottomNavigationBarItem(icon: Icon(Icons.badge_outlined), activeIcon: Icon(Icons.badge), label: 'Profile'),
+        ];
     }
   }
 
@@ -126,6 +167,8 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
         return AppTheme.pathologyAccent;
       case UserRole.pharmacy:
         return AppTheme.pharmacyAccent;
+      case UserRole.mr:
+        return AppTheme.primary;
     }
   }
 
@@ -142,9 +185,18 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     }
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _currentIndex,
+            children: pages,
+          ),
+          const Positioned(
+            bottom: 12,
+            left: 12,
+            child: SafeArea(child: NotificationBell()),
+          ),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
