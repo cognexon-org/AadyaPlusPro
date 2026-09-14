@@ -69,6 +69,13 @@ class ApiConstants {
   static const physioAvailability = '/physio/me/availability';
   static const physioBreak = '/physio/me/break';
 
+  // PHYSIOTHERAPY EXERCISES
+  static const physioExerciseCatalog = '/physio-exercises/catalog';
+  static String physioExerciseById(String id) => '/physio-exercises/catalog/$id';
+  static String physioPatientExercisePlans(String patientId) => '/physio-exercises/patients/$patientId/plans';
+  static String physioExercisePlan(String id) => '/physio-exercises/plans/$id';
+  static String physioExercisePlanProgress(String id) => '/physio-exercises/plans/$id/progress';
+
   // PATHOLOGY COMPATIBILITY
   static const pathologyProfile = '/pathology/me/profile';
   static const pathologyDashboard = '/pathology/me/dashboard';

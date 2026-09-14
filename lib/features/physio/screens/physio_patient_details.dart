@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/screens/app_chat_screen.dart';
 import '../../../core/network/api_service.dart';
+import 'physio_exercise_plan_editor.dart';
+import 'physio_exercise_plan_detail.dart';
 
 class PhysioPatientDetails extends ConsumerStatefulWidget {
   final Map<String, dynamic> patient;
@@ -21,11 +23,14 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
   final ApiService _api = ApiService();
   bool _loadingApts = true;
   List<Map<String, dynamic>> _appointments = [];
+  bool _loadingPlans = true;
+  List<Map<String, dynamic>> _plans = [];
 
   @override
   void initState() {
     super.initState();
     _fetchPatientAppointments();
+    _fetchExercisePlans();
   }
 
   Future<void> _fetchPatientAppointments() async {
@@ -49,6 +54,42 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
     }
   }
 
+  String get _patientId => (widget.patient['_id'] ?? widget.patient['patientId']?['_id'] ?? '').toString();
+
+  Future<void> _fetchExercisePlans() async {
+    if (_patientId.isEmpty) {
+      if (mounted) setState(() => _loadingPlans = false);
+      return;
+    }
+    try {
+      final res = await _api.getPhysioPatientExercisePlans(_patientId);
+      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : <String, dynamic>{};
+      final list = data['plans'] as List? ?? const [];
+      if (mounted) {
+        setState(() => _plans = list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      }
+    } catch (e) {
+      debugPrint('Exercise plans error: $e');
+    } finally {
+      if (mounted) setState(() => _loadingPlans = false);
+    }
+  }
+
+  Future<void> _createExercisePlan() async {
+    if (_patientId.isEmpty) return;
+    final created = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => PhysioExercisePlanEditor(
+        patientId: _patientId,
+        patientName: widget.patient['name']?.toString() ?? 'Patient',
+        appointmentId: _appointments.isNotEmpty ? _appointments.first['_id']?.toString() : null,
+      ),
+    ));
+    if (created == true) {
+      setState(() => _loadingPlans = true);
+      await _fetchExercisePlans();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = widget.patient;
@@ -62,7 +103,7 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
     final chronicConditions = chronicList.isEmpty ? 'No significant history' : chronicList.join(', ');
     
     final totalVisits = patient['totalVisits']?.toString() ?? _appointments.length.toString();
-    final activeTreatments = patient['activeTreatments']?.toString() ?? '0';
+    final activeTreatments = _plans.where((p) => p['status'] == 'active').length.toString();
 
     return Scaffold(
       backgroundColor: AppTheme.surface,
@@ -152,6 +193,26 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
                   ),
                   const SizedBox(height: 28),
 
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _sectionHeader('Exercise Plans', Iconsax.activity),
+                      TextButton.icon(
+                        onPressed: _createExercisePlan,
+                        icon: const Icon(Iconsax.add, size: 17),
+                        label: const Text('New Plan'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_loadingPlans)
+                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: AppTheme.physioAccent)))
+                  else if (_plans.isEmpty)
+                    _emptyState('No exercise plan assigned yet')
+                  else
+                    ..._plans.map(_buildExercisePlanCard),
+                  const SizedBox(height: 28),
+
                   // History Timeline
                   _sectionHeader('Session Timeline', Iconsax.timer_1),
                   const SizedBox(height: 12),
@@ -208,6 +269,38 @@ class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
         const SizedBox(height: 2),
         Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
       ],
+    );
+  }
+
+  Widget _buildExercisePlanCard(Map<String, dynamic> plan) {
+    final exercises = plan['exercises'] as List? ?? const [];
+    final status = (plan['status'] ?? 'active').toString();
+    final statusColor = status == 'completed' ? AppTheme.success : status == 'cancelled' ? AppTheme.textTertiary : AppTheme.physioAccent;
+    return InkWell(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PhysioExercisePlanDetail(planId: plan['_id'].toString()),
+      )).then((_) => _fetchExercisePlans()),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
+        child: Row(children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(12)),
+            child: Icon(Iconsax.activity, color: statusColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(plan['title'] ?? 'Exercise plan', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+            const SizedBox(height: 3),
+            Text('${exercises.length} exercises • ${status.toUpperCase()}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: statusColor)),
+          ])),
+          const Icon(Iconsax.arrow_right_3, size: 18, color: AppTheme.textTertiary),
+        ]),
+      ),
     );
   }
 

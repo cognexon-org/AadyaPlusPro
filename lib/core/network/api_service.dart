@@ -144,6 +144,28 @@ class ApiService {
   Future<Response> addPhysioBreak(Map<String, dynamic> data) => _dio.post(ApiConstants.physioBreak, data: data);
   Future<Response> getPhysioPatientById(String id) => _dio.get(ApiConstants.physioPatientById(id));
 
+  // PHYSIOTHERAPY EXERCISES
+  Future<Response> getPhysioExercises({Map<String, dynamic>? queryParams}) =>
+      _dio.get(ApiConstants.physioExerciseCatalog, queryParameters: queryParams);
+  Future<Response> createPhysioExercise(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.physioExerciseCatalog, data: data);
+  Future<Response> updatePhysioExercise(String id, Map<String, dynamic> data) =>
+      _dio.patch(ApiConstants.physioExerciseById(id), data: data);
+  Future<Response> deletePhysioExercise(String id) =>
+      _dio.delete(ApiConstants.physioExerciseById(id));
+  Future<Response> getPhysioPatientExercisePlans(String patientId) =>
+      _dio.get(ApiConstants.physioPatientExercisePlans(patientId));
+  Future<Response> createPhysioPatientExercisePlan(String patientId, Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.physioPatientExercisePlans(patientId), data: data);
+  Future<Response> getPhysioExercisePlan(String id) =>
+      _dio.get(ApiConstants.physioExercisePlan(id));
+  Future<Response> updatePhysioExercisePlan(String id, Map<String, dynamic> data) =>
+      _dio.patch(ApiConstants.physioExercisePlan(id), data: data);
+  Future<Response> cancelPhysioExercisePlan(String id) =>
+      _dio.delete(ApiConstants.physioExercisePlan(id));
+  Future<Response> getPhysioExercisePlanProgress(String id) =>
+      _dio.get(ApiConstants.physioExercisePlanProgress(id));
+
   // PATHOLOGY COMPATIBILITY
   Future<Response> getPathologyProfile() => _dio.get(ApiConstants.pathologyProfile);
   Future<Response> getPathologyDashboard() => _dio.get(ApiConstants.pathologyDashboard);
