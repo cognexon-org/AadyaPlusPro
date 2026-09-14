@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -59,10 +60,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
       final token = await TokenStorage.getToken();
       if (token == null) return;
       
-      // Assumes ApiConstants.baseUrl looks like 'http://13.48.49.45/api'
-      // We need the root host for socket.io typically.
-      final uri = Uri.parse(ApiConstants.baseUrl);
-      final socketUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+      final socketUrl = ApiConstants.socketBaseUrl;
 
       _socket = IO.io(socketUrl, IO.OptionBuilder()
           .setTransports(['websocket'])
@@ -71,16 +69,16 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
           .build());
 
       _socket!.onConnect((_) {
-        print('Professional App: Socket Connected!');
+        if (kDebugMode) debugPrint('Professional App: Socket connected');
         _socket!.emit('join_chat', {'sessionId': widget.sessionId});
       });
 
-      _socket!.onDisconnect((_) => print('Professional App: Socket disconnected.'));
-      _socket!.onConnectError((err) => print('Professional App: Socket ConnectError: $err'));
-      _socket!.onError((err) => print('Professional App: Socket Error: $err'));
+      _socket!.onDisconnect((_) { if (kDebugMode) debugPrint('Professional App: Socket disconnected'); });
+      _socket!.onConnectError((err) { if (kDebugMode) debugPrint('Professional App: Socket connection error: $err'); });
+      _socket!.onError((err) { if (kDebugMode) debugPrint('Professional App: Socket error: $err'); });
 
       _socket!.on('receive_message', (data) {
-        debugPrint('New message received: $data');
+        if (kDebugMode) debugPrint('New chat message received');
         try {
           Map<String, dynamic> msgData;
           if (data is String) {
@@ -105,14 +103,14 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
             _scrollToBottom();
           }
         } catch (e) {
-          debugPrint('Receive message parse error: $e');
+          if (kDebugMode) debugPrint('Receive message parse error: $e');
         }
       });
 
       _socket!.connect();
 
     } catch (e) {
-      print('Error init chat: $e');
+      if (kDebugMode) debugPrint('Error initializing chat: $e');
     } finally {
       setState(() => _loading = false);
       _scrollToBottom();

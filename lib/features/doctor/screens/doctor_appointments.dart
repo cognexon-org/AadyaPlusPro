@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:iconsax/iconsax.dart';
@@ -9,7 +8,7 @@ import '../../../shared/widgets/empty_state.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import 'doctor_prescriptions.dart';
-import '../../../shared/screens/app_web_view.dart';
+import '../../../shared/screens/professional_consultation_screen.dart';
 import '../../../shared/screens/app_chat_screen.dart';
 import 'prescription_details.dart';
 
@@ -110,7 +109,7 @@ class _DoctorAppointmentsState extends ConsumerState<DoctorAppointments> {
             // Status Filters
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _buildFilterChips(['all', 'pending', 'confirmed', 'completed', 'cancelled'], _statusFilter, (v) => setState(() => _statusFilter = v)),
+              child: _buildFilterChips(['all', 'pending', 'confirmed', 'in_progress', 'completed', 'cancelled'], _statusFilter, (v) => setState(() => _statusFilter = v)),
             ),
             const SizedBox(height: 8),
             // Type Filters
@@ -327,24 +326,16 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
 
   Future<void> _loadPrescription() async {
     try {
-      final aptId = widget.appointment['_id'];
-      if (aptId == null) return;
-      // Fetch prescriptions to find if this appointment has one
-      final patientId = (widget.appointment['patientId'] is Map) 
-          ? widget.appointment['patientId']['_id'] 
-          : widget.appointment['patientId'];
-          
-      if (patientId != null) {
-        final res = await _api.getPrescriptionsByPatient(patientId);
-        final list = res.data is Map ? (res.data['data'] ?? res.data['prescriptions'] ?? []) : res.data;
-        if (list is List) {
-          final found = list.firstWhere((p) => (p['appointmentId'] is Map ? p['appointmentId']['_id'] : p['appointmentId']) == aptId, orElse: () => null);
-          if (found != null && mounted) {
-            setState(() => _prescription = Map<String, dynamic>.from(found));
-          }
-        }
+      final aptId = widget.appointment['_id']?.toString() ?? '';
+      if (aptId.isEmpty) return;
+      final res = await _api.getPrescriptionByAppointment(aptId);
+      final raw = res.data is Map ? res.data['prescription'] : null;
+      if (raw is Map && mounted) {
+        setState(() => _prescription = Map<String, dynamic>.from(raw));
       }
-    } catch (_) {}
+    } catch (_) {
+      // A 404 simply means no appointment-linked prescription exists yet.
+    }
     if (mounted) setState(() => _loadingPrescription = false);
   }
 
@@ -427,16 +418,47 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
     }
   }
 
-  Future<void> _openMeetingLink(String? link, String patientName) async {
-    if (link == null || link.isEmpty) return;
-    Navigator.of(context).push(
+  Future<void> _openConsultation() async {
+    final result = await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => AppWebView(
-          url: link,
-          title: 'Consultation: $patientName',
+        builder: (_) => ProfessionalConsultationScreen(
+          appointment: widget.appointment,
         ),
       ),
     );
+    await _loadPrescription();
+    if (result == true && mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _cancelAppointment() async {
+    final id = widget.appointment['_id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel appointment?'),
+        content: const Text('The patient will see this appointment as cancelled.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Cancel appointment')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.cancelAppointment(id, reason: 'Cancelled by professional');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Appointment cancelled'), backgroundColor: AppTheme.success),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to cancel: $e'), backgroundColor: AppTheme.error),
+        );
+      }
+    }
   }
 
   @override
@@ -581,39 +603,42 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
                       ),
                     ),
                   ],
-                  if (type == 'video' && apt['meetingLink'] != null) ...[
+                  if (['confirmed', 'accepted', 'in_progress', 'completed'].contains(status)) ...[
                     const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2))),
-                      child: Row(
-                        children: [
-                          GestureDetector(
-                            onTap: () => _openMeetingLink(apt['meetingLink'], patientName),
-                            child: const Icon(Iconsax.video5, color: AppTheme.primary, size: 20),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => _openMeetingLink(apt['meetingLink'], patientName),
-                              child: Text('Join Video Meeting', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                    InkWell(
+                      onTap: _openConsultation,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(type == 'video' ? Iconsax.video5 : Iconsax.health, color: AppTheme.primary, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    status == 'completed' ? 'View Consultation Summary' : 'Open Consultation Workspace',
+                                    style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primary),
+                                  ),
+                                  Text(
+                                    type == 'video'
+                                        ? 'Start/join the secure video room from here'
+                                        : 'Clinical notes, prescription and completion',
+                                    style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          IconButton(
-                            onPressed: () {
-                              Clipboard.setData(ClipboardData(text: apt['meetingLink']));
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied to clipboard'), behavior: SnackBarBehavior.floating));
-                            },
-                            icon: const Icon(Iconsax.copy, color: AppTheme.primary, size: 18),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => _openMeetingLink(apt['meetingLink'], patientName),
-                            child: const Icon(Iconsax.arrow_right_3, color: AppTheme.primary, size: 18),
-                          ),
-                        ],
+                            const Icon(Iconsax.arrow_right_3, color: AppTheme.primary, size: 18),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -623,7 +648,7 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
             const SizedBox(height: 20),
 
             // Prescription Details
-            if (status == 'completed' || status == 'confirmed' || status == 'accepted') ...[
+            if (status == 'completed' || status == 'confirmed' || status == 'accepted' || status == 'in_progress') ...[
               Text('Prescription', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
               const SizedBox(height: 12),
               if (_loadingPrescription)
@@ -639,19 +664,19 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
                         children: [
                           const Icon(Iconsax.document_text, color: AppTheme.primary, size: 20),
                           const SizedBox(width: 8),
-                          Expanded(child: Text('Issued Prescription', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary))),
+                          Expanded(child: Text((_prescription!['status'] == 'draft' ? 'Draft Prescription' : 'Issued Prescription'), style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary))),
                         ],
                       ),
                       const SizedBox(height: 12),
                       if (_prescription!['diagnosis'] != null && _prescription!['diagnosis'].toString().isNotEmpty) ...[
-                        _buildDetailRow('Diagnosis', _prescription!['diagnosis'].toString()),
+                        _buildDetailRow('Diagnosis', _prescription!['diagnosis'] is List ? (_prescription!['diagnosis'] as List).join(', ') : _prescription!['diagnosis'].toString()),
                         const SizedBox(height: 8),
                       ],
                       if (_prescription!['medicines'] != null && (_prescription!['medicines'] as List).isNotEmpty) ...[
                         Text('Medicines:', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary)),
                         const SizedBox(height: 4),
                         ...(_prescription!['medicines'] as List).map((m) {
-                          final name = m is Map ? (m['name'] ?? m['medicineName'] ?? '') : m.toString();
+                          final name = m is Map ? (m['medicineName'] ?? m['name'] ?? '') : m.toString();
                           final dosage = m is Map ? (m['dosage'] ?? '') : '';
                           return Row(
                             children: [
@@ -765,17 +790,27 @@ class _AppointmentDetailsScreenState extends ConsumerState<AppointmentDetailsScr
             ] else if (status == 'confirmed' || status == 'accepted') ...[
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _changeStatus('cancelled'),
+                  onPressed: _cancelAppointment,
                   style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: const BorderSide(color: AppTheme.error), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   child: Text('Cancel', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _changeStatus('completed'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  child: Text('Mark Completed', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+                child: ElevatedButton.icon(
+                  onPressed: _openConsultation,
+                  icon: const Icon(Iconsax.health, size: 18),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  label: Text('Consult', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ] else if (status == 'in_progress') ...[
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _openConsultation,
+                  icon: const Icon(Iconsax.health, size: 18),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  label: Text('Continue Consultation', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                 ),
               ),
             ]

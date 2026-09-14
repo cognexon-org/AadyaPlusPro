@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:iconsax/iconsax.dart';
@@ -11,6 +10,7 @@ import '../../../shared/screens/app_chat_screen.dart';
 import '../../doctor/screens/doctor_prescriptions.dart';
 import '../../doctor/screens/prescription_details.dart';
 import '../../../core/network/api_service.dart';
+import '../../../shared/screens/professional_consultation_screen.dart';
 
 class PhysioAppointmentDetails extends ConsumerStatefulWidget {
   final Map<String, dynamic> appointment;
@@ -34,26 +34,65 @@ class _PhysioAppointmentDetailsState extends ConsumerState<PhysioAppointmentDeta
   }
 
   Future<void> _loadPrescription() async {
+    final appointmentId = widget.appointment['_id']?.toString() ?? '';
+    if (appointmentId.isEmpty) {
+      if (mounted) setState(() => _loadingPrescription = false);
+      return;
+    }
+    if (mounted) setState(() => _loadingPrescription = true);
     try {
-      final aptId = widget.appointment['_id'];
-      if (aptId == null) return;
-      
-      final patientId = (widget.appointment['patientId'] is Map) 
-          ? widget.appointment['patientId']['_id'] 
-          : widget.appointment['patientId'];
-          
-      if (patientId != null) {
-        final res = await _api.getPrescriptionsByPatient(patientId);
-        final list = res.data is Map ? (res.data['data'] ?? res.data['prescriptions'] ?? []) : res.data;
-        if (list is List) {
-          final found = list.firstWhere((p) => (p['appointmentId'] is Map ? p['appointmentId']['_id'] : p['appointmentId']) == aptId, orElse: () => null);
-          if (found != null && mounted) {
-            setState(() => _prescription = Map<String, dynamic>.from(found));
-          }
-        }
+      final res = await _api.getPrescriptionByAppointment(appointmentId);
+      final data = res.data;
+      final value = data is Map ? (data['prescription'] ?? data['data']) : null;
+      if (mounted) {
+        setState(() => _prescription = value is Map ? Map<String, dynamic>.from(value) : null);
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loadingPrescription = false);
+    } catch (_) {
+      if (mounted) setState(() => _prescription = null);
+    } finally {
+      if (mounted) setState(() => _loadingPrescription = false);
+    }
+  }
+
+  Future<void> _openConsultation() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfessionalConsultationScreen(appointment: widget.appointment),
+      ),
+    );
+    await _loadPrescription();
+  }
+
+  Future<void> _cancelSession() async {
+    final id = widget.appointment['_id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel session?'),
+        content: const Text('The patient will see this appointment as cancelled.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Cancel session')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.cancelAppointment(id, reason: 'Cancelled by professional');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session cancelled'), backgroundColor: AppTheme.success),
+      );
+      ref.read(physioDashboardProvider.notifier).loadAppointments();
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to cancel: $error'), backgroundColor: AppTheme.error),
+        );
+      }
+    }
   }
 
   Future<void> _changeStatus(String status) async {
@@ -282,7 +321,7 @@ class _PhysioAppointmentDetailsState extends ConsumerState<PhysioAppointmentDeta
             const SizedBox(height: 20),
 
             // Therapy Plan / Prescription
-            if (status == 'completed' || status == 'confirmed' || status == 'accepted') ...[
+            if (status == 'completed' || status == 'confirmed' || status == 'accepted' || status == 'in_progress') ...[
               Text('Therapy Plan', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
               const SizedBox(height: 12),
               if (_loadingPrescription)
@@ -433,17 +472,27 @@ class _PhysioAppointmentDetailsState extends ConsumerState<PhysioAppointmentDeta
             ] else if (status == 'confirmed' || status == 'accepted') ...[
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _changeStatus('cancelled'),
+                  onPressed: _cancelSession,
                   style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: const BorderSide(color: AppTheme.error), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   child: Text('Cancel Session', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _changeStatus('completed'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.success, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                  child: Text('Mark Completed', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+                child: ElevatedButton.icon(
+                  onPressed: _openConsultation,
+                  icon: const Icon(Iconsax.health, size: 18),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.physioAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+                  label: Text('Consult', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ] else if (status == 'in_progress') ...[
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _openConsultation,
+                  icon: const Icon(Iconsax.health, size: 18),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.physioAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+                  label: Text('Continue Consultation', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
                 ),
               ),
             ]

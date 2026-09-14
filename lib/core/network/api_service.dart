@@ -1,13 +1,20 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../constants/api_constants.dart';
 import 'token_storage.dart';
 
-/// Centralized Dio HTTP client with auth interceptor and error handling.
+typedef UnauthorizedHandler = Future<void> Function();
+
+/// Centralized Dio HTTP client with secure authentication and conservative
+/// debug logging. Request/response bodies are intentionally not logged because
+/// they may contain patient, consultation, prescription or credential data.
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
 
   late final Dio _dio;
+  UnauthorizedHandler? _onUnauthorized;
+  bool _handlingUnauthorized = false;
 
   ApiService._internal() {
     _dio = Dio(BaseOptions(
@@ -20,33 +27,49 @@ class ApiService {
       },
     ));
 
-    // Auth interceptor: attach JWT token to every request
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final token = await TokenStorage.getToken();
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
+        } else {
+          options.headers.remove('Authorization');
         }
-        return handler.next(options);
-      },
-      onError: (error, handler) {
-        // Handle 401 Unauthorized globally
-        if (error.response?.statusCode == 401) {
-          TokenStorage.clearAll();
+        if (kDebugMode) {
+          debugPrint('[API] ${options.method} ${options.uri}');
         }
-        return handler.next(error);
+        handler.next(options);
       },
-    ));
-
-    // Logging interceptor (debug only)
-    _dio.interceptors.add(LogInterceptor(
-      requestBody: true,
-      responseBody: true,
-      logPrint: (obj) => print('[API] $obj'),
+      onResponse: (response, handler) {
+        if (kDebugMode) {
+          debugPrint('[API] ${response.statusCode} ${response.requestOptions.method} ${response.requestOptions.uri}');
+        }
+        handler.next(response);
+      },
+      onError: (error, handler) async {
+        if (kDebugMode) {
+          debugPrint('[API] ${error.response?.statusCode ?? '-'} ${error.requestOptions.method} ${error.requestOptions.uri}');
+        }
+        if (error.response?.statusCode == 401 && !_handlingUnauthorized) {
+          _handlingUnauthorized = true;
+          try {
+            await TokenStorage.clearAll();
+            final callback = _onUnauthorized;
+            if (callback != null) await callback();
+          } finally {
+            _handlingUnauthorized = false;
+          }
+        }
+        handler.next(error);
+      },
     ));
   }
 
   Dio get dio => _dio;
+
+  void setUnauthorizedHandler(UnauthorizedHandler? handler) {
+    _onUnauthorized = handler;
+  }
 
   // ==================== AUTH ====================
 
@@ -314,7 +337,62 @@ class ApiService {
   }
 
   Future<Response> updatePrescription(String id, Map<String, dynamic> data) {
-    return _dio.put('${ApiConstants.prescriptions}/$id', data: data);
+    return _dio.patch('${ApiConstants.prescriptions}/$id', data: data);
+  }
+
+  Future<Response> getPrescriptionByAppointment(String appointmentId) {
+    return _dio.get(ApiConstants.prescriptionByAppointment(appointmentId));
+  }
+
+  Future<Response> issuePrescription(String id) {
+    return _dio.post(ApiConstants.prescriptionIssue(id));
+  }
+
+  Future<Response> cancelPrescription(String id, {String? reason}) {
+    return _dio.post(ApiConstants.prescriptionCancel(id), data: {
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    });
+  }
+
+  Future<Response<List<int>>> downloadPrescriptionPdf(String id) {
+    return _dio.get<List<int>>(
+      ApiConstants.prescriptionPdf(id),
+      options: Options(responseType: ResponseType.bytes),
+    );
+  }
+
+  // ==================== CONSULTATION ====================
+
+  Future<Response> getConsultationByAppointment(String appointmentId) {
+    return _dio.get(ApiConstants.consultationByAppointment(appointmentId));
+  }
+
+  Future<Response> professionalCheckIn(String appointmentId) {
+    return _dio.post(ApiConstants.consultationCheckIn(appointmentId), data: const {});
+  }
+
+  Future<Response> startConsultation(String appointmentId) {
+    return _dio.post(ApiConstants.consultationStart(appointmentId), data: const {});
+  }
+
+  Future<Response> joinConsultation(String appointmentId) {
+    return _dio.post(ApiConstants.consultationJoin(appointmentId), data: const {});
+  }
+
+  Future<Response> leaveConsultation(String appointmentId) {
+    return _dio.post(ApiConstants.consultationLeave(appointmentId), data: const {});
+  }
+
+  Future<Response> updateConsultationSummary(String appointmentId, Map<String, dynamic> data) {
+    return _dio.patch(ApiConstants.consultationSummary(appointmentId), data: data);
+  }
+
+  Future<Response> endConsultation(String appointmentId, Map<String, dynamic> data) {
+    return _dio.post(ApiConstants.consultationEnd(appointmentId), data: data);
+  }
+
+  Future<Response> getConsultationHistory({Map<String, dynamic>? queryParams}) {
+    return _dio.get(ApiConstants.consultationHistory, queryParameters: queryParams);
   }
 
   // ==================== CALENDAR ====================

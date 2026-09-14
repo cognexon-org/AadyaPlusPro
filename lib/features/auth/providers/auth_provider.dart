@@ -37,7 +37,29 @@ class AuthState {
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService _api = ApiService();
 
-  AuthNotifier() : super(const AuthState());
+  AuthNotifier() : super(const AuthState()) {
+    _api.setUnauthorizedHandler(_handleUnauthorized);
+  }
+
+  Future<void> _handleUnauthorized() async {
+    state = const AuthState(
+      isAuthenticated: false,
+      isLoading: false,
+      error: 'Your session expired. Please sign in again.',
+    );
+  }
+
+  bool _isSupportedProfessionalRole(dynamic rawRole) {
+    final role = rawRole?.toString().toLowerCase() ?? '';
+    return const {'doctor', 'physio', 'physiotherapist', 'pathology', 'pharmacy'}.contains(role);
+  }
+
+  String _unsupportedRoleMessage(dynamic rawRole) {
+    final role = rawRole?.toString().toLowerCase() ?? '';
+    if (role == 'patient') return 'Patient accounts must use the AadyaPlus patient app.';
+    if (role == 'mr') return 'The MR field-force mobile experience is enabled in Pro Patch P3.';
+    return 'This account role is not supported by AadyaPlus Professional.';
+  }
 
   void setLoading(bool loading) {
     state = state.copyWith(isLoading: loading);
@@ -71,8 +93,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       if (data != null && (data['success'] == true || data['user'] != null || data['data'] != null)) {
         final userData = data['user'] ?? data['data'] ?? data;
+        if (userData is! Map || !_isSupportedProfessionalRole(userData['role'])) {
+          await TokenStorage.clearAll();
+          setError(_unsupportedRoleMessage(userData is Map ? userData['role'] : null));
+          return false;
+        }
         final token = await TokenStorage.getToken();
-        final user = UserModel.fromJson(userData, token: token);
+        final user = UserModel.fromJson(Map<String, dynamic>.from(userData), token: token);
         
         // Persist user data
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
@@ -91,7 +118,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final cachedData = await TokenStorage.getUserData();
       if (cachedData != null) {
-        final user = UserModel.fromJson(jsonDecode(cachedData));
+        final decoded = jsonDecode(cachedData);
+        if (decoded is! Map || !_isSupportedProfessionalRole(decoded['role'])) {
+          await TokenStorage.clearAll();
+          state = const AuthState(isAuthenticated: false, isLoading: false);
+          return false;
+        }
+        final user = UserModel.fromJson(Map<String, dynamic>.from(decoded));
         setUser(user);
         return true;
       }
@@ -114,18 +147,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return false;
       }
 
-      // Extract token
+      // Extract token and validate the account role before persisting it.
       final token = data['token'] as String?;
       if (token == null || token.isEmpty) {
         setError(data['message'] ?? 'Login failed: no token received');
         return false;
       }
+      final rawUser = data['user'] ?? data['data'] ?? data;
+      if (rawUser is! Map || !_isSupportedProfessionalRole(rawUser['role'])) {
+        await TokenStorage.clearAll();
+        setError(_unsupportedRoleMessage(rawUser is Map ? rawUser['role'] : null));
+        return false;
+      }
 
-      // Save token first so subsequent API calls are authenticated
       await TokenStorage.saveToken(token);
-
-      // Parse user from response
-      final user = UserModel.fromLoginResponse(data);
+      final user = UserModel.fromJson(Map<String, dynamic>.from(rawUser), token: token);
       
       // Persist user data
       await TokenStorage.saveUserData(jsonEncode(user.toJson()));
