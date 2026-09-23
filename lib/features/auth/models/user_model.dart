@@ -1,17 +1,8 @@
-enum UserRole {
-  doctor,
-  physiotherapist,
-  pathology,
-  pharmacy,
-  mr,
-}
+import 'package:flutter/foundation.dart';
 
-enum VerificationStatus {
-  pending,
-  approved,
-  rejected,
-  suspended,
-}
+enum UserRole { doctor, physiotherapist, pathology, pharmacy, mr }
+
+enum VerificationStatus { pending, approved, rejected, suspended }
 
 class UserModel {
   final String? id;
@@ -52,7 +43,8 @@ class UserModel {
     // 2. If isVerified is true OR status is 'active', treat as approved
     // 3. Otherwise default to pending
     VerificationStatus verificationStatus;
-    if (explicitVerification != null && explicitVerification.toString().isNotEmpty) {
+    if (explicitVerification != null &&
+        explicitVerification.toString().isNotEmpty) {
       verificationStatus = _parseVerification(explicitVerification.toString());
     } else if (isVerified == true || status == 'active') {
       verificationStatus = VerificationStatus.approved;
@@ -144,6 +136,14 @@ class UserModel {
       case 'mr':
         return UserRole.mr;
       default:
+        // The backend only ever issues one of the roles above; an unrecognized
+        // value means a new role was added server-side without a matching
+        // Flutter case. Surface it loudly instead of silently misrouting the
+        // user into the doctor dashboard.
+        assert(false, 'Unknown user role from backend: "$role"');
+        debugPrint(
+          '⚠️ Unknown user role from backend: "$role" — defaulting to doctor dashboard',
+        );
         return UserRole.doctor;
     }
   }

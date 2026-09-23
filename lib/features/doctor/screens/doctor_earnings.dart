@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
@@ -112,9 +112,9 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Earnings & Payouts', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                Text('Earnings & Payouts', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                 const SizedBox(height: 4),
-                Text('Manage your commission and financial reports', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary)),
+                Text('Manage your commission and financial reports', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary)),
                 const SizedBox(height: 20),
 
                 if (_loading && _transactions.isEmpty)
@@ -136,15 +136,15 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Total Available Earnings', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: Colors.white70)),
+                                Text('Total Available Earnings', style: GoogleFonts.manrope(fontSize: 14, color: Colors.white70)),
                                 const SizedBox(height: 4),
-                                Text(_formatCurrency(_totalEarnings), style: GoogleFonts.plusJakartaSans(fontSize: 32, fontWeight: FontWeight.w800, color: Colors.white)),
+                                Text(_formatCurrency(_totalEarnings), style: GoogleFonts.manrope(fontSize: 32, fontWeight: FontWeight.w800, color: Colors.white)),
                               ],
                             ),
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(14)),
-                              child: const Icon(Iconsax.money_recive, size: 28, color: Colors.white),
+                              child: const Icon(CupertinoIcons.money_dollar_circle, size: 28, color: Colors.white),
                             ),
                           ],
                         ),
@@ -170,7 +170,7 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Earnings Overview', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                        Text('Earnings Overview', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                         const SizedBox(height: 20),
                         SizedBox(
                           height: 200,
@@ -196,7 +196,7 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
                                       final i = v.toInt() % 12;
                                       return Padding(
                                         padding: const EdgeInsets.only(top: 8),
-                                        child: Text(monthNames[i], style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                                        child: Text(monthNames[i], style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
                                       );
                                     },
                                     reservedSize: 28,
@@ -221,7 +221,7 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Transaction Ledger', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                      Text('Transaction Ledger', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                       _buildTimeFilterDropdown(),
                     ],
                   ),
@@ -236,9 +236,9 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
                       child: Center(
                         child: Column(
                           children: [
-                            Icon(Iconsax.receipt_square, size: 32, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                            Icon(Icons.receipt_outlined, size: 32, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
                             const SizedBox(height: 12),
-                            Text('No transactions found', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                            Text('No transactions found', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
                           ],
                         ),
                       ),
@@ -260,8 +260,8 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _timeFilter,
-          icon: const Icon(Iconsax.arrow_down_1, size: 14, color: AppTheme.primary),
-          style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary),
+          icon: const Icon(CupertinoIcons.chevron_down, size: 14, color: AppTheme.primary),
+          style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary),
           items: const [
             DropdownMenuItem(value: 'all', child: Text('All Time')),
             DropdownMenuItem(value: 'month', child: Text('This Month')),
@@ -297,25 +297,25 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(color: AppTheme.success.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Iconsax.money_recive, size: 20, color: AppTheme.success),
+                child: const Icon(CupertinoIcons.money_dollar_circle, size: 20, color: AppTheme.success),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    Text(name, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                     const SizedBox(height: 2),
-                    Text('Comm: ₹$commission (${_commissionRate.toInt()}%)', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                    Text('Comm: ₹$commission (${_commissionRate.toInt()}%)', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                   ],
                 ),
               ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('+₹$amount', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.success)),
+                  Text('+₹$amount', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.success)),
                   const SizedBox(height: 2),
-                  Text(_formatDate(date), style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                  Text(_formatDate(date), style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
                 ],
               ),
             ],
@@ -326,11 +326,11 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Payout Status', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+              Text('Payout Status', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                child: Text(status.toUpperCase(), style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
+                child: Text(status.toUpperCase(), style: GoogleFonts.manrope(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
               )
             ],
           )
@@ -346,9 +346,9 @@ class _DoctorEarningsState extends ConsumerState<DoctorEarnings> {
         decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
         child: Column(
           children: [
-            Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 10, color: Colors.white70)),
+            Text(label, style: GoogleFonts.manrope(fontSize: 10, color: Colors.white70)),
             const SizedBox(height: 4),
-            Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(value, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         ),
       ),
@@ -431,7 +431,7 @@ class TransactionDetailsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Transaction Details', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 18)),
+        title: Text('Transaction Details', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 18)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -448,17 +448,17 @@ class TransactionDetailsScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: AppTheme.success.withValues(alpha: 0.1), shape: BoxShape.circle),
-                    child: const Icon(Iconsax.money_recive, size: 32, color: AppTheme.success),
+                    child: const Icon(CupertinoIcons.money_dollar_circle, size: 32, color: AppTheme.success),
                   ),
                   const SizedBox(height: 16),
-                  Text('+₹$earning', style: GoogleFonts.plusJakartaSans(fontSize: 36, fontWeight: FontWeight.w800, color: AppTheme.success)),
+                  Text('+₹$earning', style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w800, color: AppTheme.success)),
                   const SizedBox(height: 4),
-                  Text('Net Earnings added to wallet', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary)),
+                  Text('Net Earnings added to wallet', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary)),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                    child: Text('Payout Status: ${status.toUpperCase()}', style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: statusColor)),
+                    child: Text('Payout Status: ${status.toUpperCase()}', style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w700, color: statusColor)),
                   ),
                 ],
               ),
@@ -468,12 +468,12 @@ class TransactionDetailsScreen extends StatelessWidget {
             // Patient
             _buildSection(
               title: 'Source / Patient',
-              icon: Iconsax.user,
+              icon: CupertinoIcons.person,
               child: Row(
                 children: [
-                  Container(width: 40, height: 40, decoration: BoxDecoration(gradient: AppTheme.doctorGradient, shape: BoxShape.circle), child: Center(child: Text(name[0], style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)))),
+                  Container(width: 40, height: 40, decoration: BoxDecoration(gradient: AppTheme.doctorGradient, shape: BoxShape.circle), child: Center(child: Text(name[0], style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)))),
                   const SizedBox(width: 12),
-                  Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                  Text(name, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                 ],
               ),
             ),
@@ -482,7 +482,7 @@ class TransactionDetailsScreen extends StatelessWidget {
             // Breakdown
             _buildSection(
               title: 'Earnings Breakdown',
-              icon: Iconsax.chart,
+              icon: CupertinoIcons.chart_bar,
               child: Column(
                 children: [
                   _buildRow('Consultation Fee', '₹$gross'),
@@ -502,7 +502,7 @@ class TransactionDetailsScreen extends StatelessWidget {
             // Meta Info
             _buildSection(
               title: 'Transaction Info',
-              icon: Iconsax.info_circle,
+              icon: CupertinoIcons.info_circle,
               child: Column(
                 children: [
                   _buildRow('Transaction ID', txId, isSmall: true),
@@ -534,7 +534,7 @@ class TransactionDetailsScreen extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: AppTheme.primary),
               const SizedBox(width: 8),
-              Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+              Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
             ],
           ),
           const SizedBox(height: 16),
@@ -548,12 +548,12 @@ class TransactionDetailsScreen extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: GoogleFonts.plusJakartaSans(fontSize: isSmall ? 12 : 13, color: AppTheme.textSecondary)),
+        Text(label, style: GoogleFonts.manrope(fontSize: isSmall ? 12 : 13, color: AppTheme.textSecondary)),
         Expanded(
           child: Text(
             value,
             textAlign: TextAlign.right,
-            style: GoogleFonts.plusJakartaSans(
+            style: GoogleFonts.manrope(
               fontSize: isSmall ? 12 : 14,
               fontWeight: isBold ? FontWeight.w700 : FontWeight.w600,
               color: color ?? AppTheme.textPrimary,

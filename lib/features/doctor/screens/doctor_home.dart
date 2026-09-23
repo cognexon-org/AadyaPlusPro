@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/stat_card.dart';
@@ -66,7 +66,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                         children: [
                           Text(
                             'Welcome back 👋',
-                            style: GoogleFonts.plusJakartaSans(
+                            style: GoogleFonts.manrope(
                               fontSize: 14,
                               color: AppTheme.textSecondary,
                             ),
@@ -74,7 +74,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                           const SizedBox(height: 4),
                           Text(
                             user?.name ?? 'Doctor',
-                            style: GoogleFonts.plusJakartaSans(
+                            style: GoogleFonts.manrope(
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
                               color: AppTheme.textPrimary,
@@ -92,7 +92,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                       ),
                       child: Badge(
                         smallSize: 8,
-                        child: const Icon(Iconsax.notification, size: 22, color: AppTheme.textPrimary),
+                        child: const Icon(CupertinoIcons.bell, size: 22, color: AppTheme.textPrimary),
                       ),
                     ),
                   ],
@@ -118,17 +118,17 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Iconsax.warning_2, size: 18, color: AppTheme.warning),
+                          const Icon(CupertinoIcons.exclamationmark_triangle, size: 18, color: AppTheme.warning),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'Using cached data. ${dashData.error}',
-                              style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.warning),
+                              style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.warning),
                             ),
                           ),
                           GestureDetector(
                             onTap: _refresh,
-                            child: const Icon(Iconsax.refresh, size: 18, color: AppTheme.warning),
+                            child: const Icon(CupertinoIcons.refresh, size: 18, color: AppTheme.warning),
                           ),
                         ],
                       ),
@@ -146,25 +146,25 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                       StatCard(
                         title: 'Appointments',
                         value: _formatStat(totalAppointments),
-                        icon: Iconsax.calendar_tick,
+                        icon: CupertinoIcons.calendar_badge_plus,
                         color: AppTheme.primary,
                       ),
                       StatCard(
                         title: 'Total Earnings',
                         value: _formatEarnings(totalEarnings),
-                        icon: Iconsax.money_recive,
+                        icon: CupertinoIcons.money_dollar_circle,
                         color: AppTheme.success,
                       ),
                       StatCard(
                         title: 'Patients',
                         value: _formatStat(totalPatients),
-                        icon: Iconsax.people,
+                        icon: CupertinoIcons.person_2,
                         color: AppTheme.accent,
                       ),
                       StatCard(
                         title: 'Avg. Rating',
                         value: _formatRating(avgRating),
-                        icon: Iconsax.star,
+                        icon: CupertinoIcons.star,
                         color: AppTheme.warning,
                       ),
                     ],
@@ -187,7 +187,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                           children: [
                             Text(
                               'Weekly Appointments',
-                              style: GoogleFonts.plusJakartaSans(
+                              style: GoogleFonts.manrope(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
                                 color: AppTheme.textPrimary,
@@ -201,7 +201,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                               ),
                               child: Text(
                                 'This Week',
-                                style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary),
+                                style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primary),
                               ),
                             ),
                           ],
@@ -222,7 +222,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                                       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                                       return Padding(
                                         padding: const EdgeInsets.only(top: 8),
-                                        child: Text(days[value.toInt()], style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                                        child: Text(days[value.toInt()], style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
                                       );
                                     },
                                     reservedSize: 28,
@@ -244,15 +244,15 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                   const SizedBox(height: 20),
 
                   // Quick Actions
-                  Text('Quick Actions', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                  Text('Quick Actions', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Expanded(child: _quickAction(Iconsax.calendar, 'Availability', AppTheme.primary, () {
+                      Expanded(child: _quickAction(CupertinoIcons.calendar, 'Availability', AppTheme.primary, () {
                         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorAvailability()));
                       })),
                       const SizedBox(width: 12),
-                      Expanded(child: _quickAction(Iconsax.document_text, 'Prescriptions', AppTheme.accent, () {
+                      Expanded(child: _quickAction(CupertinoIcons.doc_text, 'Prescriptions', AppTheme.accent, () {
                         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorPrescriptions()));
                       })),
                     ],
@@ -260,11 +260,11 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Expanded(child: _quickAction(Iconsax.calendar_tick, 'Calendar', AppTheme.success, () {
+                      Expanded(child: _quickAction(CupertinoIcons.calendar_badge_plus, 'Calendar', AppTheme.success, () {
                         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorCalendar()));
                       })),
                       const SizedBox(width: 12),
-                      Expanded(child: _quickAction(Iconsax.clock, 'Schedule', const Color(0xFF7C3AED), () {
+                      Expanded(child: _quickAction(CupertinoIcons.clock, 'Schedule', const Color(0xFF7C3AED), () {
                         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorSchedule()));
                       })),
                     ],
@@ -275,10 +275,10 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Upcoming Appointments', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                      Text('Upcoming Appointments', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                       TextButton(
                         onPressed: () {},
-                        child: Text('View All', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                        child: Text('View All', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primary)),
                       ),
                     ],
                   ),
@@ -324,7 +324,7 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
           children: [
             Icon(icon, size: 24, color: color),
             const SizedBox(height: 8),
-            Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: color), textAlign: TextAlign.center),
+            Text(label, style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: color), textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -340,9 +340,9 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
           child: Center(
             child: Column(
               children: [
-                Icon(Iconsax.calendar, size: 40, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                Icon(CupertinoIcons.calendar, size: 40, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
                 const SizedBox(height: 12),
-                Text('No upcoming appointments', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                Text('No upcoming appointments', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
               ],
             ),
           ),
@@ -366,10 +366,10 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
               : AppTheme.success;
 
       final typeIcon = type == 'video'
-          ? Iconsax.video
+          ? CupertinoIcons.video_camera
           : type == 'home'
-              ? Iconsax.home
-              : Iconsax.hospital;
+              ? CupertinoIcons.house
+              : Icons.local_hospital_outlined;
 
       return Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -387,42 +387,42 @@ class _DoctorHomeState extends ConsumerState<DoctorHome> {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(12)),
-                  child: Center(child: Text(patientName[0], style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+                  child: Center(child: Text(patientName[0], style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(patientName, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                      Text(patientName, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                       const SizedBox(height: 2),
-                      Text(reason, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                      Text(reason, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                     ],
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                  child: Text(status, style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                  child: Text(status, style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Iconsax.calendar, size: 14, color: AppTheme.textTertiary),
+                const Icon(CupertinoIcons.calendar, size: 14, color: AppTheme.textTertiary),
                 const SizedBox(width: 6),
-                Text(_formatDate(date), style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                Text(_formatDate(date), style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 const SizedBox(width: 14),
-                const Icon(Iconsax.clock, size: 14, color: AppTheme.textTertiary),
+                const Icon(CupertinoIcons.clock, size: 14, color: AppTheme.textTertiary),
                 const SizedBox(width: 6),
-                Text(time, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                Text(time, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 const SizedBox(width: 14),
                 Icon(typeIcon, size: 14, color: AppTheme.textTertiary),
                 const SizedBox(width: 6),
-                Text(type, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                Text(type, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 const Spacer(),
-                Text('₹$fee', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                Text('₹$fee', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primary)),
               ],
             ),
           ],

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 import 'patient_history.dart';
@@ -86,9 +86,9 @@ class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Patients', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                  Text('Patients', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                   const SizedBox(height: 4),
-                  Text('${_patients.length} patients', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary)),
+                  Text('${_patients.length} patients', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary)),
                 ],
               ),
             ),
@@ -97,7 +97,7 @@ class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: TextField(
                 decoration: InputDecoration(
-                  hintText: 'Search patients...', prefixIcon: const Padding(padding: EdgeInsets.symmetric(horizontal: 14), child: Icon(Iconsax.search_normal, size: 18, color: AppTheme.textTertiary)),
+                  hintText: 'Search patients...', prefixIcon: const Padding(padding: EdgeInsets.symmetric(horizontal: 14), child: Icon(CupertinoIcons.search, size: 18, color: AppTheme.textTertiary)),
                   filled: true, fillColor: Colors.white,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.border)),
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.border)),
@@ -115,9 +115,9 @@ class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
                           ? ListView(children: [
                               const SizedBox(height: 80),
                               Center(child: Column(children: [
-                                Icon(Iconsax.people, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                                Icon(CupertinoIcons.person_2, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
                                 const SizedBox(height: 12),
-                                Text(_error ?? 'No patients yet', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                                Text(_error ?? 'No patients yet', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
                               ])),
                             ])
                           : ListView.builder(
@@ -146,22 +146,22 @@ class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
                                         Container(
                                           width: 44, height: 44,
                                           decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(12)),
-                                          child: Center(child: Text((p['name'] ?? 'P')[0], style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+                                          child: Center(child: Text((p['name'] ?? 'P')[0], style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              Text(p['name'] ?? 'Patient', style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                                              Text(p['name'] ?? 'Patient', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                                               const SizedBox(height: 2),
-                                              Text(p['phone'] ?? '', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                                              Text(p['phone'] ?? '', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                                               const SizedBox(height: 4),
                                               Row(
                                                 children: [
-                                                  const Icon(Iconsax.chart_square, size: 12, color: AppTheme.textTertiary),
+                                                  const Icon(CupertinoIcons.chart_bar_square, size: 12, color: AppTheme.textTertiary),
                                                   const SizedBox(width: 4),
-                                                  Text('${p['visits']} visits', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                                                  Text('${p['visits']} visits', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
                                                 ],
                                               ),
                                             ],
@@ -171,9 +171,9 @@ class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                           decoration: BoxDecoration(border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)), borderRadius: BorderRadius.circular(8)),
                                           child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                            const Icon(Iconsax.arrow_right_3, size: 14, color: AppTheme.primary),
+                                            const Icon(CupertinoIcons.chevron_right, size: 14, color: AppTheme.primary),
                                             const SizedBox(width: 4),
-                                            Text('History', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                                            Text('History', style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary)),
                                           ]),
                                         ),
                                       ],

@@ -35,7 +35,7 @@ class ProfessionalNotificationNotifier
   final ApiService _api = ApiService();
 
   ProfessionalNotificationNotifier()
-      : super(const ProfessionalNotificationState());
+    : super(const ProfessionalNotificationState());
 
   Future<void> refresh({bool silent = false}) async {
     if (!silent) state = state.copyWith(isLoading: true, clearError: true);
@@ -44,7 +44,10 @@ class ProfessionalNotificationNotifier
       final data = response.data;
       final raw = data is Map ? data['notifications'] : null;
       final list = raw is List
-          ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          ? raw
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList()
           : <Map<String, dynamic>>[];
       final unread = data is Map
           ? int.tryParse('${data['unreadCount'] ?? 0}') ?? 0
@@ -64,7 +67,11 @@ class ProfessionalNotificationNotifier
       await _api.markNotificationRead(id);
       final updated = state.notifications.map((row) {
         if ('${row['_id'] ?? row['id']}' != id) return row;
-        return {...row, 'read': true, 'readAt': DateTime.now().toIso8601String()};
+        return {
+          ...row,
+          'read': true,
+          'readAt': DateTime.now().toIso8601String(),
+        };
       }).toList();
       final unread = updated.where((row) => row['read'] != true).length;
       state = state.copyWith(notifications: updated, unreadCount: unread);
@@ -101,7 +108,8 @@ class ProfessionalNotificationNotifier
   }
 }
 
-final professionalNotificationProvider = StateNotifierProvider<
-    ProfessionalNotificationNotifier, ProfessionalNotificationState>(
-  (ref) => ProfessionalNotificationNotifier(),
-);
+final professionalNotificationProvider =
+    StateNotifierProvider<
+      ProfessionalNotificationNotifier,
+      ProfessionalNotificationState
+    >((ref) => ProfessionalNotificationNotifier());

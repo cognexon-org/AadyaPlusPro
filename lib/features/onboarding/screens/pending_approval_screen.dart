@@ -1,15 +1,64 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 
-class PendingApprovalScreen extends ConsumerWidget {
+// Reached only when profileCompleted is false — normally unreachable, since
+// both the registration wizard and login now route straight to '/dashboard'
+// once the profile is complete (admin verification only affects public
+// discoverability, never the professional's own dashboard access). Getting
+// here means something interrupted profile setup (e.g. an old app version,
+// or a manual account edit) — this screen lets the user recheck status or
+// pick registration back up rather than being stuck.
+class PendingApprovalScreen extends ConsumerStatefulWidget {
   const PendingApprovalScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PendingApprovalScreen> createState() => _PendingApprovalScreenState();
+}
+
+class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
+  Timer? _pollTimer;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _checkStatus());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkStatus({bool showFeedback = false}) async {
+    if (_checking) return;
+    setState(() => _checking = true);
+    final ok = await ref.read(authProvider.notifier).refreshUser();
+    if (!mounted) return;
+    setState(() => _checking = false);
+
+    final user = ref.read(authProvider).user;
+    if (user?.profileCompleted == true) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+      return;
+    }
+    if (showFeedback) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok ? 'Still incomplete — please finish registration.' : 'Could not check status. Check your connection.'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final user = authState.user;
 
@@ -61,7 +110,7 @@ class PendingApprovalScreen extends ConsumerWidget {
                         ],
                       ),
                       child: const Icon(
-                        Iconsax.clock,
+                        CupertinoIcons.clock,
                         size: 40,
                         color: Colors.white,
                       ),
@@ -73,8 +122,8 @@ class PendingApprovalScreen extends ConsumerWidget {
               const SizedBox(height: 32),
 
               Text(
-                'Profile Under Review',
-                style: GoogleFonts.plusJakartaSans(
+                'Profile Setup Incomplete',
+                style: GoogleFonts.manrope(
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textPrimary,
@@ -82,55 +131,15 @@ class PendingApprovalScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Hi ${user?.name ?? "there"}, your profile has been submitted successfully and is currently under review by our admin team.',
+                'Hi ${user?.name ?? "there"}, it looks like your professional profile setup didn\'t finish. Finish registration to reach your dashboard — this doesn\'t require admin approval.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 15,
                   color: AppTheme.textSecondary,
                   height: 1.6,
                 ),
               ),
               const SizedBox(height: 32),
-
-              // Status timeline
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.border),
-                ),
-                child: Column(
-                  children: [
-                    _buildTimelineItem(
-                      'Profile Submitted',
-                      'Your registration details received',
-                      Iconsax.tick_circle5,
-                      AppTheme.success,
-                      true,
-                    ),
-                    _buildTimelineConnector(true),
-                    _buildTimelineItem(
-                      'Document Verification',
-                      'Admin reviewing your documents',
-                      Iconsax.document_text,
-                      AppTheme.warning,
-                      false,
-                      isActive: true,
-                    ),
-                    _buildTimelineConnector(false),
-                    _buildTimelineItem(
-                      'Profile Approved',
-                      'Start accepting patients',
-                      Iconsax.verify,
-                      AppTheme.textTertiary,
-                      false,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
 
               Container(
                 padding: const EdgeInsets.all(16),
@@ -141,12 +150,12 @@ class PendingApprovalScreen extends ConsumerWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Iconsax.info_circle, size: 20, color: AppTheme.info),
+                    const Icon(CupertinoIcons.info_circle, size: 20, color: AppTheme.info),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Verification typically takes 24-48 hours. We\'ll send you a notification once approved.',
-                        style: GoogleFonts.plusJakartaSans(
+                        'Admin verification only affects whether patients can discover and book you publicly — you can still set up your profile, store and inventory right away.',
+                        style: GoogleFonts.manrope(
                           fontSize: 13,
                           color: AppTheme.info,
                           height: 1.5,
@@ -159,16 +168,48 @@ class PendingApprovalScreen extends ConsumerWidget {
 
               const Spacer(flex: 2),
 
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _checking ? null : () => _checkStatus(showFeedback: true),
+                  icon: _checking
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.refresh, size: 18),
+                  label: Text(
+                    _checking ? 'Checking...' : 'Check Again',
+                    style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.of(context).pushNamedAndRemoveUntil('/register', (r) => false);
+                  },
+                  child: Text(
+                    'Resume Registration',
+                    style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+
               // Logout button
               TextButton.icon(
                 onPressed: () {
                   ref.read(authProvider.notifier).logout();
                   Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
                 },
-                icon: const Icon(Iconsax.logout, size: 18),
+                icon: const Icon(Icons.logout_outlined, size: 18),
                 label: Text(
                   'Sign Out',
-                  style: GoogleFonts.plusJakartaSans(
+                  style: GoogleFonts.manrope(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -179,88 +220,6 @@ class PendingApprovalScreen extends ConsumerWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTimelineItem(
-    String title,
-    String subtitle,
-    IconData icon,
-    Color color,
-    bool completed, {
-    bool isActive = false,
-  }) {
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: completed
-                ? color.withValues(alpha: 0.1)
-                : isActive
-                    ? color.withValues(alpha: 0.1)
-                    : AppTheme.surface,
-            shape: BoxShape.circle,
-            border: isActive
-                ? Border.all(color: color, width: 2)
-                : null,
-          ),
-          child: Icon(icon, size: 20, color: color),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: completed || isActive ? AppTheme.textPrimary : AppTheme.textTertiary,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (completed)
-          const Icon(Iconsax.tick_circle5, size: 18, color: AppTheme.success),
-        if (isActive)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.warning.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'In Progress',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.warning,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTimelineConnector(bool completed) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 19),
-      child: Container(
-        width: 2,
-        height: 24,
-        color: completed ? AppTheme.success.withValues(alpha: 0.3) : AppTheme.divider,
       ),
     );
   }

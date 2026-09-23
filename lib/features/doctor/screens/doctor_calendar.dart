@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 import 'doctor_appointments.dart';
@@ -57,7 +57,7 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Calendar', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('Calendar', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
       ),
       body: RefreshIndicator(
@@ -76,12 +76,12 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
                       Text(
                         _selectedDate.day == DateTime.now().day && _selectedDate.month == DateTime.now().month
                             ? "Today's Appointments" : '${_selectedDate.day}/${_selectedDate.month} Appointments',
-                        style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                        style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-                        child: Text('${dayAppointments.length}', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                        child: Text('${dayAppointments.length}', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                       ),
                     ]),
                   ),
@@ -90,9 +90,9 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
                     Center(child: Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Iconsax.calendar, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
+                        Icon(CupertinoIcons.calendar, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
                         const SizedBox(height: 12),
-                        Text('No appointments on this date', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                        Text('No appointments on this date', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
                       ]),
                     ))
                   else
@@ -134,22 +134,22 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
           // Month navigation
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             IconButton(
-              icon: const Icon(Iconsax.arrow_left_2, size: 20),
+              icon: const Icon(CupertinoIcons.chevron_back, size: 20),
               onPressed: () => setState(() => _focusedMonth = DateTime(year, month - 1)),
             ),
             Text(
               '${_monthName(month)} $year',
-              style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
+              style: GoogleFonts.manrope(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
             ),
             IconButton(
-              icon: const Icon(Iconsax.arrow_right_3, size: 20),
+              icon: const Icon(CupertinoIcons.chevron_right, size: 20),
               onPressed: () => setState(() => _focusedMonth = DateTime(year, month + 1)),
             ),
           ]),
           const SizedBox(height: 12),
           // Day headers
           Row(children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-              .map((d) => Expanded(child: Center(child: Text(d, style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.textTertiary)))))
+              .map((d) => Expanded(child: Center(child: Text(d, style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.textTertiary)))))
               .toList()),
           const SizedBox(height: 8),
           // Days grid
@@ -176,7 +176,7 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
                       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                         Text(
                           '$dayNum',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 14,
                             fontWeight: isToday || isSelected ? FontWeight.w700 : FontWeight.w500,
                             color: isSelected ? Colors.white : isToday ? AppTheme.primary : AppTheme.textPrimary,
@@ -227,29 +227,29 @@ class _DoctorCalendarState extends ConsumerState<DoctorCalendar> {
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(12)),
-            child: Center(child: Text(name[0], style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
+            child: Center(child: Text(name[0], style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            Text(name, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
             Row(children: [
               if (time.isNotEmpty) ...[
-                const Icon(Iconsax.clock, size: 12, color: AppTheme.textTertiary),
+                const Icon(CupertinoIcons.clock, size: 12, color: AppTheme.textTertiary),
                 const SizedBox(width: 4),
-                Text(time, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+                Text(time, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
                 const SizedBox(width: 8),
               ],
-              Icon(type == 'video' ? Iconsax.video : type == 'home' ? Iconsax.home : Iconsax.hospital, size: 12, color: AppTheme.textTertiary),
+              Icon(type == 'video' ? CupertinoIcons.video_camera : type == 'home' ? CupertinoIcons.house : Icons.local_hospital_outlined, size: 12, color: AppTheme.textTertiary),
               const SizedBox(width: 4),
-              Text(type, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+              Text(type, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
             ]),
             if (reason.isNotEmpty)
-              Text(reason, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(reason, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary), maxLines: 1, overflow: TextOverflow.ellipsis),
           ])),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-            child: Text(status, style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w600, color: statusColor)),
+            child: Text(status, style: GoogleFonts.manrope(fontSize: 10, fontWeight: FontWeight.w600, color: statusColor)),
           ),
         ]),
       ),

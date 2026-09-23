@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
@@ -78,16 +78,16 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(24),
                                 child: Image.network(profile['profileImage'], width: 90, height: 90, fit: BoxFit.cover,
-                                  errorBuilder: (_, e, s) => Text(name.substring(0, 1), style: GoogleFonts.plusJakartaSans(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                                  errorBuilder: (_, e, s) => Text(name.substring(0, 1), style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                                 ),
                               )
-                            : Text(name.substring(0, 1), style: GoogleFonts.plusJakartaSans(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                            : Text(name.substring(0, 1), style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
+                    Text(name, style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
                     const SizedBox(height: 4),
-                    Text('$specialization • $experience+ years', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: Colors.white70)),
+                    Text('$specialization • $experience+ years', style: GoogleFonts.manrope(fontSize: 13, color: Colors.white70)),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -97,9 +97,9 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
                           decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
                           child: Row(
                             children: [
-                              const Icon(Iconsax.star, size: 14, color: Colors.amber),
+                              const Icon(CupertinoIcons.star, size: 14, color: Colors.amber),
                               const SizedBox(width: 4),
-                              Text(rating, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+                              Text(rating, style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
                             ],
                           ),
                         ),
@@ -112,11 +112,11 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
                           ),
                           child: Row(
                             children: [
-                              Icon(verificationStatus == 'approved' ? Iconsax.verify5 : Iconsax.clock, size: 14, color: verificationStatus == 'approved' ? AppTheme.success : AppTheme.warning),
+                              Icon(verificationStatus == 'approved' ? CupertinoIcons.checkmark_seal_fill : CupertinoIcons.clock, size: 14, color: verificationStatus == 'approved' ? AppTheme.success : AppTheme.warning),
                               const SizedBox(width: 4),
                               Text(
                                 verificationStatus == 'approved' ? 'Verified' : 'Pending',
-                                style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                                style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
                               ),
                             ],
                           ),
@@ -146,38 +146,38 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
                   const SizedBox(height: 20),
 
                   _infoSection('Contact', [
-                    _infoRow(Iconsax.call, 'Phone', phone.isNotEmpty ? phone : 'Not set'),
-                    _infoRow(Iconsax.sms, 'Email', email.isNotEmpty ? email : 'Not set'),
+                    _infoRow(CupertinoIcons.phone, 'Phone', phone.isNotEmpty ? phone : 'Not set'),
+                    _infoRow(CupertinoIcons.mail, 'Email', email.isNotEmpty ? email : 'Not set'),
                   ]),
                   const SizedBox(height: 12),
 
                   _infoSection('Professional', [
-                    _infoRow(Iconsax.document, 'License', license),
-                    _infoRow(Iconsax.briefcase, 'Experience', '$experience years'),
-                    _infoRow(Iconsax.medal_star, 'Specialization', specialization),
-                    _infoRow(Iconsax.money_recive, 'Consultation Fee', '₹$consultFee'),
-                    _infoRow(Iconsax.home, 'Home Visit Fee', '₹$homeVisitFee'),
+                    _infoRow(CupertinoIcons.doc, 'License', license),
+                    _infoRow(CupertinoIcons.briefcase, 'Experience', '$experience years'),
+                    _infoRow(Icons.workspace_premium_outlined, 'Specialization', specialization),
+                    _infoRow(CupertinoIcons.money_dollar_circle, 'Consultation Fee', '₹$consultFee'),
+                    _infoRow(CupertinoIcons.house, 'Home Visit Fee', '₹$homeVisitFee'),
                   ]),
                   const SizedBox(height: 12),
 
                   _infoSection('Clinic Address', [
-                    _infoRow(Iconsax.location, 'Address', addressStr),
+                    _infoRow(CupertinoIcons.location, 'Address', addressStr),
                   ]),
                   const SizedBox(height: 20),
 
-                  _menuItem(Iconsax.calendar_tick, 'My Schedule', () {
+                  _menuItem(CupertinoIcons.calendar_badge_plus, 'My Schedule', () {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorSchedule()));
                   }),
-                  _menuItem(Iconsax.shield_tick, 'Set Availability', () {
+                  _menuItem(CupertinoIcons.checkmark_shield, 'Set Availability', () {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorAvailability()));
                   }),
-                  _menuItem(Iconsax.document_text, 'Prescriptions', () {
+                  _menuItem(CupertinoIcons.doc_text, 'Prescriptions', () {
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorPrescriptions()));
                   }),
-                  _menuItem(Iconsax.message_question, 'Help & Support', () {}),
+                  _menuItem(CupertinoIcons.chat_bubble_text, 'Help & Support', () {}),
                   const SizedBox(height: 12),
                   _menuItem(
-                    Iconsax.logout,
+                    Icons.logout_outlined,
                     'Sign Out',
                     () async {
                       await ref.read(authProvider.notifier).logout();
@@ -212,9 +212,9 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
         child: Column(
           children: [
-            Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+            Text(value, style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
             const SizedBox(height: 4),
-            Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+            Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
           ],
         ),
       ),
@@ -228,7 +228,7 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+          Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -252,9 +252,9 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textTertiary)),
+                Text(label, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary)),
                 const SizedBox(height: 2),
-                Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
+                Text(value, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
               ],
             ),
           ),
@@ -282,8 +282,8 @@ class _DoctorProfileState extends ConsumerState<DoctorProfile> {
               children: [
                 Icon(icon, size: 20, color: isDestructive ? AppTheme.error : AppTheme.textSecondary),
                 const SizedBox(width: 14),
-                Expanded(child: Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w500, color: isDestructive ? AppTheme.error : AppTheme.textPrimary))),
-                Icon(Iconsax.arrow_right_3, size: 18, color: isDestructive ? AppTheme.error : AppTheme.textTertiary),
+                Expanded(child: Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: isDestructive ? AppTheme.error : AppTheme.textPrimary))),
+                Icon(CupertinoIcons.chevron_right, size: 18, color: isDestructive ? AppTheme.error : AppTheme.textTertiary),
               ],
             ),
           ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_service.dart';
@@ -65,7 +65,7 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        title: Text(plan['title'] ?? 'Exercise plan', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text(plan['title'] ?? 'Exercise plan', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         actions: [
           PopupMenuButton<String>(
             onSelected: _setStatus,
@@ -86,7 +86,7 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.border)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(patient['name'] ?? 'Patient', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(patient['name'] ?? 'Patient', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   _chip((plan['status'] ?? 'active').toString().toUpperCase()),
@@ -95,12 +95,12 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
                 ]),
                 if ((plan['instructions'] ?? '').toString().isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  Text(plan['instructions'], style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary)),
+                  Text(plan['instructions'], style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary)),
                 ],
               ]),
             ),
             const SizedBox(height: 18),
-            Text('Exercises', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text('Exercises', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
             ...exercises.map((raw) {
               final item = Map<String, dynamic>.from(raw as Map);
@@ -110,16 +110,16 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(ex['name'] ?? 'Exercise', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+                  Text(ex['name'] ?? 'Exercise', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 6),
-                  Text('${item['sets'] ?? 0} sets • ${item['reps'] ?? 0} reps${(item['durationSec'] ?? 0) > 0 ? ' • ${item['durationSec']} sec' : ''}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
-                  if ((item['frequency'] ?? '').toString().isNotEmpty) Text(item['frequency'], style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.physioAccent)),
-                  if ((item['notes'] ?? '').toString().isNotEmpty) Text(item['notes'], style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                  Text('${item['sets'] ?? 0} sets • ${item['reps'] ?? 0} reps${(item['durationSec'] ?? 0) > 0 ? ' • ${item['durationSec']} sec' : ''}', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
+                  if ((item['frequency'] ?? '').toString().isNotEmpty) Text(item['frequency'], style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.physioAccent)),
+                  if ((item['notes'] ?? '').toString().isNotEmpty) Text(item['notes'], style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 ]),
               );
             }),
             const SizedBox(height: 18),
-            Text('Patient progress', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text('Patient progress', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
             if (_logs.isEmpty)
               Container(
@@ -133,7 +133,7 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
                 final date = DateTime.tryParse(log['performedAt']?.toString() ?? '');
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  leading: CircleAvatar(backgroundColor: AppTheme.physioAccent.withValues(alpha: .1), child: const Icon(Iconsax.tick_circle, color: AppTheme.physioAccent)),
+                  leading: CircleAvatar(backgroundColor: AppTheme.physioAccent.withValues(alpha: .1), child: const Icon(CupertinoIcons.checkmark_circle, color: AppTheme.physioAccent)),
                   title: Text(ex['name'] ?? 'Exercise'),
                   subtitle: Text('${date == null ? '' : DateFormat('dd MMM, hh:mm a').format(date.toLocal())} • ${log['setsCompleted'] ?? 0} sets • ${log['repsCompleted'] ?? 0} reps'),
                   trailing: (log['painAfter'] != null) ? Text('Pain ${log['painAfter']}/10') : null,
@@ -148,6 +148,6 @@ class _PhysioExercisePlanDetailState extends State<PhysioExercisePlanDetail> {
   Widget _chip(String text) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
         decoration: BoxDecoration(color: AppTheme.physioAccent.withValues(alpha: .08), borderRadius: BorderRadius.circular(8)),
-        child: Text(text, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.physioAccent, fontWeight: FontWeight.w600)),
+        child: Text(text, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.physioAccent, fontWeight: FontWeight.w600)),
       );
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
@@ -41,7 +41,7 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Earnings & Payments', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('Earnings & Payments', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0,
       ),
       body: RefreshIndicator(
@@ -72,12 +72,12 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Total Portfolio Value', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w500)),
-                              const Icon(Iconsax.wallet_2, color: Colors.white, size: 24),
+                              Text('Total Portfolio Value', style: GoogleFonts.manrope(fontSize: 14, color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w500)),
+                              const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 24),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          Text(_fmtLargeCurrency(total), style: GoogleFonts.plusJakartaSans(fontSize: 36, fontWeight: FontWeight.w800, color: Colors.white)),
+                          Text(_fmtLargeCurrency(total), style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w800, color: Colors.white)),
                           const SizedBox(height: 24),
                           Row(
                             children: [
@@ -92,7 +92,7 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                     const SizedBox(height: 28),
 
                     // Analytics Section
-                    Text('Performance Analysis', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                    Text('Performance Analysis', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                     const SizedBox(height: 16),
                     Container(
                       padding: const EdgeInsets.all(20),
@@ -100,7 +100,7 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Earnings Trend', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                          Text('Earnings Trend', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 24),
                           SizedBox(
                             height: 180,
@@ -111,7 +111,7 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                                 bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, _) {
                                   const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
                                   if (v.toInt() >= 0 && v.toInt() < m.length) {
-                                    return Padding(padding: const EdgeInsets.only(top: 8), child: Text(m[v.toInt()], style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)));
+                                    return Padding(padding: const EdgeInsets.only(top: 8), child: Text(m[v.toInt()], style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)));
                                   }
                                   return const SizedBox();
                                 }, reservedSize: 28)),
@@ -133,8 +133,8 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Recent Transactions', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-                        const Icon(Iconsax.sort, size: 20, color: AppTheme.textTertiary),
+                        Text('Recent Transactions', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                        const Icon(CupertinoIcons.sort_down, size: 20, color: AppTheme.textTertiary),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -145,9 +145,9 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.border)),
                         child: Column(
                           children: [
-                            Icon(Iconsax.receipt_search, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.2)),
+                            Icon(Icons.receipt_long_outlined, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.2)),
                             const SizedBox(height: 12),
-                            Text('No transaction record found', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                            Text('No transaction record found', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
                           ],
                         ),
                       )
@@ -165,8 +165,8 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w500)),
-        Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+        Text(label, style: GoogleFonts.manrope(fontSize: 11, color: Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w500)),
+        Text(value, style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
       ],
     );
   }
@@ -208,23 +208,23 @@ class _PhysioEarningsState extends ConsumerState<PhysioEarnings> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: AppTheme.success.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: const Icon(Iconsax.received, color: AppTheme.success, size: 20),
+              child: const Icon(CupertinoIcons.arrow_down_left, color: AppTheme.success, size: 20),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-                  Text('Consultation Fee: ₹$fee', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                  Text(name, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                  Text('Consultation Fee: ₹$fee', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 ],
               ),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('₹$amount', style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.success)),
-                Text(dateStr, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                Text('₹$amount', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.success)),
+                Text(dateStr, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
               ],
             ),
           ],

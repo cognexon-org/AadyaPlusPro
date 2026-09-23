@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -40,7 +40,7 @@ class PhysioTransactionDetails extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Transaction Details', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 18)),
+        title: Text('Transaction Details', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 18)),
         backgroundColor: Colors.white,
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,
@@ -74,12 +74,12 @@ class PhysioTransactionDetails extends StatelessWidget {
                       color: AppTheme.success.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Iconsax.money_tick, size: 32, color: AppTheme.success),
+                    child: const Icon(CupertinoIcons.money_dollar_circle, size: 32, color: AppTheme.success),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     '+₹${earning.toStringAsFixed(2)}',
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 32,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.success,
@@ -88,7 +88,7 @@ class PhysioTransactionDetails extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     'Net Professional Earning',
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 13,
                       color: AppTheme.textSecondary,
                       fontWeight: FontWeight.w500,
@@ -112,7 +112,7 @@ class PhysioTransactionDetails extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           status.toUpperCase(),
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: statusColor,
@@ -129,7 +129,7 @@ class PhysioTransactionDetails extends StatelessWidget {
             // Patient Section
             _buildSection(
               title: 'Source Details',
-              icon: Iconsax.user,
+              icon: CupertinoIcons.person,
               child: Row(
                 children: [
                   Container(
@@ -142,7 +142,7 @@ class PhysioTransactionDetails extends StatelessWidget {
                     child: Center(
                       child: Text(
                         name.isNotEmpty ? name[0] : 'P',
-                        style: GoogleFonts.plusJakartaSans(
+                        style: GoogleFonts.manrope(
                           fontSize: 20,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
@@ -157,7 +157,7 @@ class PhysioTransactionDetails extends StatelessWidget {
                       children: [
                         Text(
                           name,
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                             color: AppTheme.textPrimary,
@@ -165,7 +165,7 @@ class PhysioTransactionDetails extends StatelessWidget {
                         ),
                         Text(
                           'Physiotherapy Session',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 12,
                             color: AppTheme.textSecondary,
                           ),
@@ -181,7 +181,7 @@ class PhysioTransactionDetails extends StatelessWidget {
             // Financial Breakdown
             _buildSection(
               title: 'Earnings Breakdown',
-              icon: Iconsax.chart_21,
+              icon: CupertinoIcons.chart_pie,
               child: Column(
                 children: [
                   _buildDetailRow('Session Fee', '₹${gross.toStringAsFixed(2)}'),
@@ -212,7 +212,7 @@ class PhysioTransactionDetails extends StatelessWidget {
             // Transaction Info
             _buildSection(
               title: 'Transaction Reference',
-              icon: Iconsax.info_circle,
+              icon: CupertinoIcons.info_circle,
               child: Column(
                 children: [
                   _buildDetailRow('Reference ID', txId, isSmall: true),
@@ -231,7 +231,7 @@ class PhysioTransactionDetails extends StatelessWidget {
             Text(
               'If you have any issues with this transaction,\nplease contact Aadya Plus Support.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 12,
                 color: AppTheme.textTertiary,
                 height: 1.5,
@@ -261,7 +261,7 @@ class PhysioTransactionDetails extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 title,
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textPrimary,
@@ -282,7 +282,7 @@ class PhysioTransactionDetails extends StatelessWidget {
       children: [
         Text(
           label,
-          style: GoogleFonts.plusJakartaSans(
+          style: GoogleFonts.manrope(
             fontSize: isSmall ? 12 : 13,
             color: AppTheme.textSecondary,
             fontWeight: FontWeight.w500,
@@ -290,7 +290,7 @@ class PhysioTransactionDetails extends StatelessWidget {
         ),
         Text(
           value,
-          style: GoogleFonts.plusJakartaSans(
+          style: GoogleFonts.manrope(
             fontSize: isSmall ? 12 : 14,
             fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
             color: valueColor ?? AppTheme.textPrimary,

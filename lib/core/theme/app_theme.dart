@@ -84,13 +84,13 @@ class AppTheme {
         surface: surface,
         error: error,
       ),
-      textTheme: GoogleFonts.plusJakartaSansTextTheme(),
+      textTheme: GoogleFonts.manropeTextTheme(),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.plusJakartaSans(
+        titleTextStyle: GoogleFonts.manrope(
           fontSize: 20,
           fontWeight: FontWeight.w700,
           color: textPrimary,
@@ -124,11 +124,11 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: error),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        hintStyle: GoogleFonts.plusJakartaSans(
-          color: textTertiary,
-          fontSize: 14,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
         ),
+        hintStyle: GoogleFonts.manrope(color: textTertiary, fontSize: 14),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -139,7 +139,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
+          textStyle: GoogleFonts.manrope(
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
@@ -153,7 +153,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          textStyle: GoogleFonts.plusJakartaSans(
+          textStyle: GoogleFonts.manrope(
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
@@ -163,11 +163,11 @@ class AppTheme {
         backgroundColor: Colors.white,
         selectedItemColor: primary,
         unselectedItemColor: textTertiary,
-        selectedLabelStyle: GoogleFonts.plusJakartaSans(
+        selectedLabelStyle: GoogleFonts.manrope(
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
-        unselectedLabelStyle: GoogleFonts.plusJakartaSans(
+        unselectedLabelStyle: GoogleFonts.manrope(
           fontSize: 12,
           fontWeight: FontWeight.w500,
         ),
@@ -177,16 +177,14 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: const Color(0xFFF0F9FF),
         selectedColor: primary.withValues(alpha: 0.15),
-        labelStyle: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w500),
-        side: const BorderSide(color: Color(0xFFBAE6FD)),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
+        labelStyle: GoogleFonts.manrope(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
         ),
+        side: const BorderSide(color: Color(0xFFBAE6FD)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      dividerTheme: const DividerThemeData(
-        color: divider,
-        thickness: 1,
-      ),
+      dividerTheme: const DividerThemeData(color: divider, thickness: 1),
     );
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 import 'prescription_details.dart';
@@ -54,12 +54,12 @@ class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with 
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Prescriptions', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('Prescriptions', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
         bottom: TabBar(
           controller: _tabController,
-          labelStyle: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: GoogleFonts.plusJakartaSans(fontSize: 14),
+          labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: GoogleFonts.manrope(fontSize: 14),
           labelColor: AppTheme.primary, unselectedLabelColor: AppTheme.textTertiary,
           indicatorColor: AppTheme.primary, indicatorWeight: 3,
           tabs: const [Tab(text: 'All Prescriptions'), Tab(text: 'Write New')],
@@ -77,11 +77,11 @@ class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with 
                       ? ListView(children: [
                           const SizedBox(height: 80),
                           Center(child: Column(children: [
-                            Icon(Iconsax.document_text, size: 56, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
+                            Icon(CupertinoIcons.doc_text, size: 56, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
                             const SizedBox(height: 16),
-                            Text('No prescriptions yet', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+                            Text('No prescriptions yet', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
                             const SizedBox(height: 8),
-                            Text('Write a new prescription to get started', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textTertiary)),
+                            Text('Write a new prescription to get started', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textTertiary)),
                           ])),
                         ])
                       : ListView.builder(
@@ -97,8 +97,8 @@ class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with 
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openCreatePrescription,
         backgroundColor: AppTheme.primary,
-        icon: const Icon(Iconsax.document_text, color: Colors.white),
-        label: Text('New', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, color: Colors.white)),
+        icon: const Icon(CupertinoIcons.doc_text, color: Colors.white),
+        label: Text('New', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, color: Colors.white)),
       ),
     );
   }
@@ -132,14 +132,14 @@ class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with 
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(10)),
-              child: Center(child: Text(patientName[0], style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
+              child: Center(child: Text(patientName[0], style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(patientName, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-              Text(diagnosis, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+              Text(patientName, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+              Text(diagnosis, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
             ])),
-            Text(formattedDate, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+            Text(formattedDate, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
           ]),
           if (meds is List && meds.isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -149,13 +149,13 @@ class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with 
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(8)),
                 child: Text(m is Map ? (m['medicineName'] ?? m['name'] ?? m['medicine'] ?? '') : m.toString(),
-                  style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w500, color: AppTheme.primary)),
+                  style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w500, color: AppTheme.primary)),
               )).toList(),
             ),
             if (meds.length > 3)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text('+${meds.length - 3} more', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                child: Text('+${meds.length - 3} more', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
               ),
           ],
         ]),
@@ -428,7 +428,7 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Appointment', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
+          Text('Appointment', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           if (_selectedAppointmentId != null)
             Container(
@@ -446,13 +446,13 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_selectedPatientName, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-                        Text('Appointment $_selectedAppointmentId', style: GoogleFonts.plusJakartaSans(fontSize: 10, color: AppTheme.textTertiary)),
+                        Text(_selectedPatientName, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                        Text('Appointment $_selectedAppointmentId', style: GoogleFonts.manrope(fontSize: 10, color: AppTheme.textTertiary)),
                       ],
                     ),
                   ),
                   if (widget.initialAppointmentId == null)
-                    IconButton(onPressed: _clearAppointment, icon: const Icon(Iconsax.close_circle)),
+                    IconButton(onPressed: _clearAppointment, icon: const Icon(CupertinoIcons.xmark_circle)),
                 ],
               ),
             )
@@ -462,7 +462,7 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
               onChanged: _searchAppointments,
               decoration: InputDecoration(
                 hintText: 'Search your patient appointments...',
-                prefixIcon: const Icon(Iconsax.search_normal, size: 18),
+                prefixIcon: const Icon(CupertinoIcons.search, size: 18),
                 suffixIcon: _searching
                     ? const Padding(
                         padding: EdgeInsets.all(12),
@@ -501,7 +501,7 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
               ),
           ],
           const SizedBox(height: 20),
-          Text('Diagnosis', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
+          Text('Diagnosis', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           TextField(
             controller: _diagnosisController,
@@ -511,8 +511,8 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Medicines (optional)', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
-              TextButton.icon(onPressed: _addMedicine, icon: const Icon(Iconsax.add_circle, size: 18), label: const Text('Add')),
+              Text('Medicines (optional)', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
+              TextButton.icon(onPressed: _addMedicine, icon: const Icon(CupertinoIcons.add_circled, size: 18), label: const Text('Add')),
             ],
           ),
           const SizedBox(height: 8),
@@ -531,9 +531,9 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
                 children: [
                   Row(
                     children: [
-                      Text('Medicine ${index + 1}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                      Text('Medicine ${index + 1}', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
                       const Spacer(),
-                      IconButton(onPressed: () => _removeMedicine(index), icon: const Icon(Iconsax.trash, size: 18, color: AppTheme.error)),
+                      IconButton(onPressed: () => _removeMedicine(index), icon: const Icon(CupertinoIcons.trash, size: 18, color: AppTheme.error)),
                     ],
                   ),
                   TextFormField(
@@ -578,7 +578,7 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
             );
           }),
           const SizedBox(height: 12),
-          Text('Advice / Notes', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
+          Text('Advice / Notes', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           TextField(controller: _notesController, maxLines: 3, decoration: const InputDecoration(hintText: 'Care instructions or notes')),
           const SizedBox(height: 24),
@@ -613,7 +613,7 @@ class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScr
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('Write Prescription', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('Write Prescription', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white,
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,

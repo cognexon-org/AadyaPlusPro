@@ -47,7 +47,7 @@ class StatCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: AppTheme.textSecondary,
@@ -69,7 +69,7 @@ class StatCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               value,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textPrimary,
@@ -79,7 +79,7 @@ class StatCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 change!,
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                   color: change!.startsWith('+') ? AppTheme.success : AppTheme.error,

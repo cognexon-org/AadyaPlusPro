@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
-import '../../../core/theme/app_theme.dart';
 import '../providers/auth_provider.dart';
-import '../models/user_model.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -29,16 +26,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     );
 
     _fadeIn = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: const Interval(0, 0.5, curve: Curves.easeOut)),
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0, 0.5, curve: Curves.easeOut),
+      ),
     );
 
     _scale = Tween<double>(begin: 0.8, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: const Interval(0, 0.6, curve: Curves.elasticOut)),
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0, 0.6, curve: Curves.elasticOut),
+      ),
     );
 
-    _slideUp = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
-      CurvedAnimation(parent: _controller, curve: const Interval(0.3, 0.7, curve: Curves.easeOut)),
-    );
+    _slideUp = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: const Interval(0.3, 0.7, curve: Curves.easeOut),
+          ),
+        );
 
     _controller.forward();
 
@@ -58,7 +65,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     if (success) {
       final user = ref.read(authProvider).user;
-      if (user != null && (user.verificationStatus == VerificationStatus.approved || user.isVerified)) {
+      // See login_screen.dart — profileCompleted is the real gate, not
+      // verificationStatus (that only affects public discoverability).
+      if (user != null && user.profileCompleted) {
         Navigator.of(context).pushReplacementNamed('/dashboard');
       } else {
         Navigator.of(context).pushReplacementNamed('/pending');
@@ -82,11 +91,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0EA5E9),
-              Color(0xFF0284C7),
-              Color(0xFF7C3AED),
-            ],
+            colors: [Color(0xFF0EA5E9), Color(0xFF0284C7), Color(0xFF7C3AED)],
           ),
         ),
         child: Center(
@@ -101,31 +106,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     opacity: _fadeIn,
                     child: ScaleTransition(
                       scale: _scale,
-                      child: Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(28),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 30,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Iconsax.health,
-                            size: 48,
-                            color: AppTheme.primary,
-                          ),
-                        ),
+                      child: Image.asset(
+                        'assets/brand/icon.png',
+                        width: 260,
+                        height: 260,
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
                   // Title
                   SlideTransition(
                     position: _slideUp,
@@ -135,7 +124,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                         children: [
                           Text(
                             'Aadya Plus',
-                            style: GoogleFonts.plusJakartaSans(
+                            style: GoogleFonts.manrope(
                               fontSize: 32,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
@@ -145,7 +134,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                           const SizedBox(height: 4),
                           Text(
                             'Professional',
-                            style: GoogleFonts.plusJakartaSans(
+                            style: GoogleFonts.manrope(
                               fontSize: 18,
                               fontWeight: FontWeight.w400,
                               color: Colors.white.withValues(alpha: 0.85),

@@ -35,8 +35,8 @@ class _PathologyHomeState extends State<PathologyHome> {
       body: SafeArea(child: RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(20), children: [
         Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${lab['labName'] ?? 'Diagnostics'}', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-            Text('Diagnostics merchant operations', style: GoogleFonts.plusJakartaSans(color: AppTheme.textSecondary)),
+            Text('${lab['labName'] ?? 'Diagnostics'}', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+            Text('Diagnostics merchant operations', style: GoogleFonts.manrope(color: AppTheme.textSecondary)),
           ])),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PathologyStaffScreen())), icon: const Icon(Icons.people_outline), tooltip: 'Field staff'),
         ]),
@@ -51,11 +51,11 @@ class _PathologyHomeState extends State<PathologyHome> {
         const SizedBox(height: 16),
         Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(gradient: AppTheme.pathologyGradient, borderRadius: BorderRadius.circular(16)), child: Row(children: [
           const Icon(Icons.currency_rupee, color: Colors.white), const SizedBox(width: 10),
-          Expanded(child: Text('Paid revenue this month', style: GoogleFonts.plusJakartaSans(color: Colors.white70))),
-          Text('₹${stats['monthlyPaidRevenue'] ?? 0}', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+          Expanded(child: Text('Paid revenue this month', style: GoogleFonts.manrope(color: Colors.white70))),
+          Text('₹${stats['monthlyPaidRevenue'] ?? 0}', style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
         ])),
         const SizedBox(height: 20),
-        Text('Recent diagnostic orders', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
+        Text('Recent diagnostic orders', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         if (recent.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(18), child: Text('No recent orders.'))),
         ...recent.map((o) {
@@ -71,6 +71,6 @@ class _PathologyHomeState extends State<PathologyHome> {
     );
   }
 
-  Widget _stat(String label, dynamic value, IconData icon, Color color) => Container(width: 155, padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, color: color), const SizedBox(height: 8), Text('$value', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w800)), Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary))]));
+  Widget _stat(String label, dynamic value, IconData icon, Color color) => Container(width: 155, padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, color: color), const SizedBox(height: 8), Text('$value', style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w800)), Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary))]));
   String _label(String v) => v.split('_').map((e) => e.isEmpty ? e : '${e[0].toUpperCase()}${e.substring(1)}').join(' ');
 }

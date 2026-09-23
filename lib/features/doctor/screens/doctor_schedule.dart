@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -63,10 +63,10 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('My Schedule', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('My Schedule', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
         actions: [
-          IconButton(icon: const Icon(Iconsax.refresh), onPressed: _loadSchedule),
+          IconButton(icon: const Icon(CupertinoIcons.refresh), onPressed: _loadSchedule),
         ],
       ),
       body: _loading
@@ -81,7 +81,7 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
                   const SizedBox(height: 20),
 
                   // Weekly overview
-                  Text('Weekly Schedule', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                  Text('Weekly Schedule', style: GoogleFonts.manrope(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                   const SizedBox(height: 12),
                   ..._weeklySchedule.map((day) => _dayCard(day)),
 
@@ -91,7 +91,7 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
                   const SizedBox(height: 24),
 
                   // Day preview
-                  Text('Day Preview', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                  Text('Day Preview', style: GoogleFonts.manrope(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                   const SizedBox(height: 12),
                   _dayPreviewSection(),
                 ],
@@ -126,9 +126,9 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
       child: Column(children: [
-        Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.w700, color: color)),
+        Text(value, style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w700, color: color)),
         const SizedBox(height: 2),
-        Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+        Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
       ]),
     ));
   }
@@ -147,10 +147,10 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-            child: Text(displayName, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+            child: Text(displayName, style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.primary)),
           ),
           const Spacer(),
-          Text('${slots.length} slot${slots.length != 1 ? 's' : ''}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+          Text('${slots.length} slot${slots.length != 1 ? 's' : ''}', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
         ]),
         if (slots.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -160,9 +160,9 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(8), border: Border.all(color: typeColor.withValues(alpha: 0.15))),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(s['type'] == 'video' ? Iconsax.video : s['type'] == 'home' ? Iconsax.home : Iconsax.hospital, size: 12, color: typeColor),
+                Icon(s['type'] == 'video' ? CupertinoIcons.video_camera : s['type'] == 'home' ? CupertinoIcons.house : Icons.local_hospital_outlined, size: 12, color: typeColor),
                 const SizedBox(width: 6),
-                Text('${s['startTime']} - ${s['endTime']}', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w500, color: typeColor)),
+                Text('${s['startTime']} - ${s['endTime']}', style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w500, color: typeColor)),
               ]),
             );
           }).toList()),
@@ -189,9 +189,9 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.border)),
               child: Row(children: [
-                const Icon(Iconsax.calendar, size: 16, color: AppTheme.primary),
+                const Icon(CupertinoIcons.calendar, size: 16, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                Text('${_previewDate.day}/${_previewDate.month}/${_previewDate.year}', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w500)),
+                Text('${_previewDate.day}/${_previewDate.month}/${_previewDate.year}', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w500)),
               ]),
             ),
           )),
@@ -199,7 +199,7 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
           ElevatedButton(
             onPressed: _previewLoading ? null : _loadDayPreview,
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-            child: Text(_previewLoading ? 'Loading...' : 'Preview', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+            child: Text(_previewLoading ? 'Loading...' : 'Preview', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
           ),
         ]),
 
@@ -210,7 +210,7 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
             decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Text(_dayPreview!['dayName'] ?? '', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                Text(_dayPreview!['dayName'] ?? '', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -220,7 +220,7 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
                   ),
                   child: Text(
                     _dayPreview!['isAvailable'] == true ? 'Available' : 'Not Available',
-                    style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: _dayPreview!['isAvailable'] == true ? AppTheme.success : AppTheme.error),
+                    style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w600, color: _dayPreview!['isAvailable'] == true ? AppTheme.success : AppTheme.error),
                   ),
                 ),
               ]),
@@ -231,9 +231,9 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
                   child: Row(children: [
                     Container(width: 4, height: 4, decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2))),
                     const SizedBox(width: 8),
-                    Text('${s['startTime']} - ${s['endTime']}', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textPrimary)),
+                    Text('${s['startTime']} - ${s['endTime']}', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textPrimary)),
                     const SizedBox(width: 8),
-                    Text('(${s['type'] ?? 'clinic'})', style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+                    Text('(${s['type'] ?? 'clinic'})', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
                   ]),
                 )),
               ],
@@ -249,11 +249,11 @@ class _DoctorScheduleState extends ConsumerState<DoctorSchedule> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
       child: Column(children: [
-        Icon(Iconsax.calendar, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
+        Icon(CupertinoIcons.calendar, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
         const SizedBox(height: 12),
-        Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+        Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
         const SizedBox(height: 4),
-        Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textTertiary)),
+        Text(subtitle, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary)),
       ]),
     );
   }

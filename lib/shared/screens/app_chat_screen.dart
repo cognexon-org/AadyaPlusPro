@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
@@ -195,7 +195,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
           children: [
             Text(
               widget.patientName,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textPrimary,
@@ -203,7 +203,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
             ),
             Text(
               'Patient',
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 12,
                 color: AppTheme.textSecondary,
               ),
@@ -278,7 +278,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
                               ),
                               child: Text(
                                 (msg['content'] ?? '').toString(),
-                                style: GoogleFonts.plusJakartaSans(
+                                style: GoogleFonts.manrope(
                                   fontSize: 14,
                                   color: isMe
                                       ? Colors.white
@@ -296,7 +296,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
                                 createdAt == null
                                     ? ''
                                     : DateFormat('hh:mm a').format(createdAt),
-                                style: GoogleFonts.plusJakartaSans(
+                                style: GoogleFonts.manrope(
                                   fontSize: 10,
                                   color: AppTheme.textSecondary,
                                   fontWeight: FontWeight.w500,
@@ -321,7 +321,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
                           controller: _msgController,
                           decoration: InputDecoration(
                             hintText: 'Type a message...',
-                            hintStyle: GoogleFonts.plusJakartaSans(
+                            hintStyle: GoogleFonts.manrope(
                               color: AppTheme.textSecondary,
                               fontSize: 14,
                             ),
@@ -358,7 +358,7 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
                                   ),
                                 )
                               : const Icon(
-                                  Iconsax.send_1,
+                                  CupertinoIcons.paperplane,
                                   color: Colors.white,
                                   size: 20,
                                 ),

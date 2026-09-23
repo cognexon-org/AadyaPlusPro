@@ -10,6 +10,8 @@ class DashboardData {
   final List<Map<String, dynamic>> medicines;
   final List<Map<String, dynamic>> prescriptions;
   final List<Map<String, dynamic>> invoices;
+  final List<Map<String, dynamic>> lowStockMedicines;
+  final List<Map<String, dynamic>> expiringBatches;
   final Map<String, dynamic> earnings;
   final Map<String, dynamic> profile;
   final bool isLoading;
@@ -22,6 +24,8 @@ class DashboardData {
     this.medicines = const [],
     this.prescriptions = const [],
     this.invoices = const [],
+    this.lowStockMedicines = const [],
+    this.expiringBatches = const [],
     this.earnings = const {},
     this.profile = const {},
     this.isLoading = false,
@@ -35,6 +39,8 @@ class DashboardData {
     List<Map<String, dynamic>>? medicines,
     List<Map<String, dynamic>>? prescriptions,
     List<Map<String, dynamic>>? invoices,
+    List<Map<String, dynamic>>? lowStockMedicines,
+    List<Map<String, dynamic>>? expiringBatches,
     Map<String, dynamic>? earnings,
     Map<String, dynamic>? profile,
     bool? isLoading,
@@ -47,6 +53,8 @@ class DashboardData {
       medicines: medicines ?? this.medicines,
       prescriptions: prescriptions ?? this.prescriptions,
       invoices: invoices ?? this.invoices,
+      lowStockMedicines: lowStockMedicines ?? this.lowStockMedicines,
+      expiringBatches: expiringBatches ?? this.expiringBatches,
       earnings: earnings ?? this.earnings,
       profile: profile ?? this.profile,
       isLoading: isLoading ?? this.isLoading,
@@ -66,8 +74,9 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
       final response = await _api.getDoctorDashboard();
       final data = response.data;
       // Backend returns { success: true, stats: { ... } }
-      final backendStats = data['stats'] ?? data['data'] ?? (data is Map ? data : {});
-      
+      final backendStats =
+          data['stats'] ?? data['data'] ?? (data is Map ? data : {});
+
       final mergedStats = Map<String, dynamic>.from(state.stats);
       if (backendStats is Map) {
         mergedStats.addAll(Map<String, dynamic>.from(backendStats));
@@ -84,24 +93,32 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
       final response = await _api.getDoctorAppointments(queryParams: params);
       final data = response.data;
       final list = _extractList(data);
-      
+
       final now = DateTime.now();
       final totalAppointments = list.length;
-      final completedAppointments = list.where((a) => a['status'] == 'completed').length;
-      final pendingAppointments = list.where((a) => a['status'] == 'pending' || a['status'] == 'confirmed').length;
-      
+      final completedAppointments = list
+          .where((a) => a['status'] == 'completed')
+          .length;
+      final pendingAppointments = list
+          .where((a) => a['status'] == 'pending' || a['status'] == 'confirmed')
+          .length;
+
       final upcomingApps = list.where((a) {
         final dateStr = a['appointmentDate']?.toString() ?? '';
         try {
           final d = DateTime.parse(dateStr);
-          return d.isAfter(now.subtract(const Duration(hours: 1))) && 
-                 ['confirmed', 'accepted', 'pending'].contains(a['status']);
-        } catch (_) { return false; }
+          return d.isAfter(now.subtract(const Duration(hours: 1))) &&
+              ['confirmed', 'accepted', 'pending'].contains(a['status']);
+        } catch (_) {
+          return false;
+        }
       }).toList();
-      
+
       upcomingApps.sort((a, b) {
-        final da = DateTime.tryParse(a['appointmentDate']?.toString() ?? '') ?? now;
-        final db = DateTime.tryParse(b['appointmentDate']?.toString() ?? '') ?? now;
+        final da =
+            DateTime.tryParse(a['appointmentDate']?.toString() ?? '') ?? now;
+        final db =
+            DateTime.tryParse(b['appointmentDate']?.toString() ?? '') ?? now;
         return da.compareTo(db);
       });
 
@@ -118,8 +135,12 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
         return list.where((a) {
           try {
             final d = DateTime.parse(a['appointmentDate']?.toString() ?? '');
-            return d.year == date.year && d.month == date.month && d.day == date.day;
-          } catch (_) { return false; }
+            return d.year == date.year &&
+                d.month == date.month &&
+                d.day == date.day;
+          } catch (_) {
+            return false;
+          }
         }).length;
       });
 
@@ -129,9 +150,11 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
         try {
           final d = DateTime.parse(dateStr);
           // Include today (subtract small buffer) and future
-          return d.isAfter(now.subtract(const Duration(hours: 1))) && 
-                 ['confirmed', 'accepted', 'pending'].contains(a['status']);
-        } catch (_) { return false; }
+          return d.isAfter(now.subtract(const Duration(hours: 1))) &&
+              ['confirmed', 'accepted', 'pending'].contains(a['status']);
+        } catch (_) {
+          return false;
+        }
       }).toList();
 
       // Update state but PRESERVE other fields by using the latest state
@@ -153,13 +176,19 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
 
   Future<void> loadEarnings() async {
     try {
-      final response = await _api.getCommissions(queryParams: {'limit': 1000, 'page': 1});
+      final response = await _api.getCommissions(
+        queryParams: {'limit': 1000, 'page': 1},
+      );
       final data = response.data;
       final commissions = _extractList(data);
       final totals = data is Map ? (data['totals'] ?? {}) : {};
-      
-      final totalEarnings = totals['totalProfessionalEarnings'] ??
-          commissions.fold<num>(0, (sum, c) => sum + (c['professionalEarning'] ?? 0));
+
+      final totalEarnings =
+          totals['totalProfessionalEarnings'] ??
+          commissions.fold<num>(
+            0,
+            (sum, c) => sum + (c['professionalEarning'] ?? 0),
+          );
 
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['totalEarnings'] = totalEarnings;
@@ -179,14 +208,17 @@ class DoctorDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getDoctorProfile();
       final data = response.data;
-      final profileData = data['doctor'] ?? data['data'] ?? data['profile'] ?? data;
-      final profileMap = Map<String, dynamic>.from(profileData is Map ? profileData : {});
-      
+      final profileData =
+          data['doctor'] ?? data['data'] ?? data['profile'] ?? data;
+      final profileMap = Map<String, dynamic>.from(
+        profileData is Map ? profileData : {},
+      );
+
       final currentStats = Map<String, dynamic>.from(state.stats);
       if (profileMap['averageRating'] != null) {
         currentStats['averageRating'] = profileMap['averageRating'];
       }
-      
+
       state = state.copyWith(profile: profileMap, stats: currentStats);
     } catch (_) {}
   }
@@ -226,9 +258,13 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
       if (backendStats is Map) {
         currentStats.addAll(Map<String, dynamic>.from(backendStats));
         // Normalize field names for home screen display
-        currentStats['totalAppointments'] = backendStats['todaysAppointments'] ?? currentStats['totalAppointments'];
-        currentStats['upcoming'] = backendStats['todaysAppointments'] ?? currentStats['upcoming'];
-        currentStats['totalEarnings'] = backendStats['totalEarnings'] ?? currentStats['totalEarnings'];
+        currentStats['totalAppointments'] =
+            backendStats['todaysAppointments'] ??
+            currentStats['totalAppointments'];
+        currentStats['upcoming'] =
+            backendStats['todaysAppointments'] ?? currentStats['upcoming'];
+        currentStats['totalEarnings'] =
+            backendStats['totalEarnings'] ?? currentStats['totalEarnings'];
         currentStats['earnings'] = currentStats['totalEarnings'];
       }
 
@@ -244,7 +280,6 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
     } catch (_) {}
   }
 
-
   Future<void> loadAppointments({String? status}) async {
     try {
       final params = <String, dynamic>{'limit': 100};
@@ -252,7 +287,7 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
       final response = await _api.getPhysioAppointments(queryParams: params);
       final data = response.data;
       final list = _extractList(data);
-      
+
       state = state.copyWith(appointments: list);
     } catch (_) {}
   }
@@ -271,13 +306,19 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
 
   Future<void> loadEarnings() async {
     try {
-      final response = await _api.getCommissions(queryParams: {'limit': 1000, 'page': 1});
+      final response = await _api.getCommissions(
+        queryParams: {'limit': 1000, 'page': 1},
+      );
       final data = response.data;
       final commissions = _extractList(data);
       final totals = data is Map ? (data['totals'] ?? {}) : {};
-      
-      final totalEarnings = totals['totalProfessionalEarnings'] ??
-          commissions.fold<num>(0, (sum, c) => sum + (c['professionalEarning'] ?? 0));
+
+      final totalEarnings =
+          totals['totalProfessionalEarnings'] ??
+          commissions.fold<num>(
+            0,
+            (sum, c) => sum + (c['professionalEarning'] ?? 0),
+          );
 
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['totalEarnings'] = totalEarnings;
@@ -288,7 +329,8 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
           'totalEarnings': totalEarnings,
           'commissions': commissions,
           'totals': totals,
-          'transactions': commissions, // For backwards compatibility with physio_earnings expected shape
+          'transactions':
+              commissions, // For backwards compatibility with physio_earnings expected shape
         },
       );
     } catch (_) {}
@@ -298,8 +340,13 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getPhysioProfile();
       final data = response.data;
-      final profileData = data['physio'] ?? data['data'] ?? data['profile'] ?? data;
-      state = state.copyWith(profile: Map<String, dynamic>.from(profileData is Map ? profileData : {}));
+      final profileData =
+          data['physio'] ?? data['data'] ?? data['profile'] ?? data;
+      state = state.copyWith(
+        profile: Map<String, dynamic>.from(
+          profileData is Map ? profileData : {},
+        ),
+      );
     } catch (_) {}
   }
 
@@ -307,8 +354,16 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.updatePhysioProfile(data);
       if (response.data['success'] == true) {
-        final profileData = response.data['physio'] ?? response.data['data'] ?? response.data['profile'] ?? response.data;
-        state = state.copyWith(profile: Map<String, dynamic>.from(profileData is Map ? profileData : {}));
+        final profileData =
+            response.data['physio'] ??
+            response.data['data'] ??
+            response.data['profile'] ??
+            response.data;
+        state = state.copyWith(
+          profile: Map<String, dynamic>.from(
+            profileData is Map ? profileData : {},
+          ),
+        );
         return true;
       }
       return false;
@@ -317,7 +372,6 @@ class PhysioDashboardNotifier extends StateNotifier<DashboardData> {
       return false;
     }
   }
-
 
   Future<void> loadAll() async {
     state = state.copyWith(isLoading: true, error: null);
@@ -356,11 +410,14 @@ class PathologyDashboardNotifier extends StateNotifier<DashboardData> {
       final profileData = data['profile'] ?? {};
 
       final mergedStats = Map<String, dynamic>.from(state.stats);
-      mergedStats['totalTests'] = profileData['totalTestsConducted'] ?? monthly['totalTests'] ?? 0;
+      mergedStats['totalTests'] =
+          profileData['totalTestsConducted'] ?? monthly['totalTests'] ?? 0;
       mergedStats['totalEarnings'] = monthly['totalRevenue'] ?? 0;
-      mergedStats['pendingTests'] = monthly['pendingTests'] ?? today['pendingTests'] ?? 0;
+      mergedStats['pendingTests'] =
+          monthly['pendingTests'] ?? today['pendingTests'] ?? 0;
       mergedStats['completedTests'] = monthly['completedTests'] ?? 0;
-      mergedStats['homeCollections'] = profileData['homeCollectionAvailable'] == true ? 1 : 0;
+      mergedStats['homeCollections'] =
+          profileData['homeCollectionAvailable'] == true ? 1 : 0;
       mergedStats['averageRating'] = profileData['averageRating'] ?? 0;
       mergedStats['labName'] = profileData['labName'] ?? '';
       // For home screen chart - today's count
@@ -396,10 +453,20 @@ class PathologyDashboardNotifier extends StateNotifier<DashboardData> {
       final currentStats = Map<String, dynamic>.from(state.stats);
       if (list.isNotEmpty) {
         currentStats['totalTests'] = currentStats['totalTests'] ?? list.length;
-        final pending = list.where((t) => ['requested', 'scheduled', 'sample_collected', 'processing'].contains(t['status'])).length;
+        final pending = list
+            .where(
+              (t) => [
+                'requested',
+                'scheduled',
+                'sample_collected',
+                'processing',
+              ].contains(t['status']),
+            )
+            .length;
         final homeCollections = list.where((t) => t['type'] == 'home').length;
         currentStats['pendingTests'] = currentStats['pendingTests'] ?? pending;
-        currentStats['homeCollections'] = currentStats['homeCollections'] ?? homeCollections;
+        currentStats['homeCollections'] =
+            currentStats['homeCollections'] ?? homeCollections;
       }
 
       state = state.copyWith(recentTransactions: list, stats: currentStats);
@@ -430,13 +497,18 @@ class PathologyDashboardNotifier extends StateNotifier<DashboardData> {
       final data = response.data;
       // Backend: { success, profile: {...} }
       final profileData = data['profile'] ?? data['data'] ?? data;
-      final profileMap = Map<String, dynamic>.from(profileData is Map ? profileData : {});
+      final profileMap = Map<String, dynamic>.from(
+        profileData is Map ? profileData : {},
+      );
 
       // Merge useful profile fields into stats
       final currentStats = Map<String, dynamic>.from(state.stats);
-      if (profileMap['totalTestsConducted'] != null) currentStats['totalTests'] = profileMap['totalTestsConducted'];
-      if (profileMap['totalEarnings'] != null) currentStats['totalEarnings'] = profileMap['totalEarnings'];
-      if (profileMap['averageRating'] != null) currentStats['averageRating'] = profileMap['averageRating'];
+      if (profileMap['totalTestsConducted'] != null)
+        currentStats['totalTests'] = profileMap['totalTestsConducted'];
+      if (profileMap['totalEarnings'] != null)
+        currentStats['totalEarnings'] = profileMap['totalEarnings'];
+      if (profileMap['averageRating'] != null)
+        currentStats['averageRating'] = profileMap['averageRating'];
 
       state = state.copyWith(profile: profileMap, stats: currentStats);
     } on DioException catch (e) {
@@ -446,13 +518,19 @@ class PathologyDashboardNotifier extends StateNotifier<DashboardData> {
 
   Future<void> loadEarnings() async {
     try {
-      final response = await _api.getCommissions(queryParams: {'limit': 1000, 'page': 1});
+      final response = await _api.getCommissions(
+        queryParams: {'limit': 1000, 'page': 1},
+      );
       final data = response.data;
       final commissions = _extractList(data);
       final totals = data is Map ? (data['totals'] ?? {}) : {};
-      
-      final totalEarnings = totals['totalProfessionalEarnings'] ??
-          commissions.fold<num>(0, (sum, c) => sum + (c['professionalEarning'] ?? 0));
+
+      final totalEarnings =
+          totals['totalProfessionalEarnings'] ??
+          commissions.fold<num>(
+            0,
+            (sum, c) => sum + (c['professionalEarning'] ?? 0),
+          );
 
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['totalEarnings'] = totalEarnings;
@@ -492,9 +570,12 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getPharmacyProfile();
       final data = response.data;
-      final profileData = data['pharmacy'] ?? data['data'] ?? data['profile'] ?? data;
+      final profileData =
+          data['pharmacy'] ?? data['data'] ?? data['profile'] ?? data;
       state = state.copyWith(
-        profile: Map<String, dynamic>.from(profileData is Map ? profileData : {}),
+        profile: Map<String, dynamic>.from(
+          profileData is Map ? profileData : {},
+        ),
         isLoading: false,
       );
     } on DioException catch (e) {
@@ -509,7 +590,7 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
       final response = await _api.getPharmacySales(queryParams: {'limit': 100});
       final data = response.data;
       final sales = _extractList(data['sales'] ?? data);
-      
+
       final totals = data['totals'] ?? {};
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['totalSales'] = totals['totalSales'] ?? 0;
@@ -523,7 +604,9 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getMedicines(queryParams: {'limit': 1000});
       final data = response.data;
-      state = state.copyWith(medicines: _extractList(data['medicines'] ?? data));
+      state = state.copyWith(
+        medicines: _extractList(data['medicines'] ?? data),
+      );
     } catch (_) {}
   }
 
@@ -531,7 +614,9 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getPrescriptions(queryParams: {'limit': 50});
       final data = response.data;
-      state = state.copyWith(prescriptions: _extractList(data['prescriptions'] ?? data));
+      state = state.copyWith(
+        prescriptions: _extractList(data['prescriptions'] ?? data),
+      );
     } catch (_) {}
   }
 
@@ -548,11 +633,11 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
       final response = await _api.getLowStockMedicines();
       final data = response.data;
       final list = _extractList(data['medicines'] ?? data);
-      
+
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['lowStockCount'] = list.length;
-      
-      state = state.copyWith(stats: currentStats);
+
+      state = state.copyWith(stats: currentStats, lowStockMedicines: list);
     } catch (_) {}
   }
 
@@ -560,21 +645,24 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
     try {
       final response = await _api.getExpiringMedicines();
       final data = response.data;
-      // You can store this in a separate field if needed, for now just for stats
-      final list = _extractList(data['medicines'] ?? data);
-      
+      // Backend returns { success, batches: [...] } for this endpoint
+      // specifically — not 'medicines' like every other list here.
+      final list = _extractList(data['batches'] ?? data['medicines'] ?? data);
+
       final currentStats = Map<String, dynamic>.from(state.stats);
       currentStats['expiringCount'] = list.length;
-      
-      state = state.copyWith(stats: currentStats);
+
+      state = state.copyWith(stats: currentStats, expiringBatches: list);
     } catch (_) {}
   }
 
   Future<void> loadEarnings() async {
     try {
-      final response = await _api.getPharmacySalesReport(queryParams: {'groupBy': 'month'});
+      final response = await _api.getPharmacySalesReport(
+        queryParams: {'groupBy': 'month'},
+      );
       final data = response.data;
-      
+
       state = state.copyWith(
         earnings: {
           'report': data['report'] ?? [],
@@ -654,32 +742,38 @@ class AppointmentActionsNotifier extends StateNotifier<AsyncValue<void>> {
 
 // ==================== PROVIDERS ====================
 
-final doctorDashboardProvider = StateNotifierProvider<DoctorDashboardNotifier, DashboardData>(
-  (ref) => DoctorDashboardNotifier(),
-);
+final doctorDashboardProvider =
+    StateNotifierProvider<DoctorDashboardNotifier, DashboardData>(
+      (ref) => DoctorDashboardNotifier(),
+    );
 
-final physioDashboardProvider = StateNotifierProvider<PhysioDashboardNotifier, DashboardData>(
-  (ref) => PhysioDashboardNotifier(),
-);
+final physioDashboardProvider =
+    StateNotifierProvider<PhysioDashboardNotifier, DashboardData>(
+      (ref) => PhysioDashboardNotifier(),
+    );
 
-final pathologyDashboardProvider = StateNotifierProvider<PathologyDashboardNotifier, DashboardData>(
-  (ref) => PathologyDashboardNotifier(),
-);
+final pathologyDashboardProvider =
+    StateNotifierProvider<PathologyDashboardNotifier, DashboardData>(
+      (ref) => PathologyDashboardNotifier(),
+    );
 
-final pharmacyDashboardProvider = StateNotifierProvider<PharmacyDashboardNotifier, DashboardData>(
-  (ref) => PharmacyDashboardNotifier(),
-);
+final pharmacyDashboardProvider =
+    StateNotifierProvider<PharmacyDashboardNotifier, DashboardData>(
+      (ref) => PharmacyDashboardNotifier(),
+    );
 
-final appointmentActionsProvider = StateNotifierProvider<AppointmentActionsNotifier, AsyncValue<void>>(
-  (ref) => AppointmentActionsNotifier(),
-);
+final appointmentActionsProvider =
+    StateNotifierProvider<AppointmentActionsNotifier, AsyncValue<void>>(
+      (ref) => AppointmentActionsNotifier(),
+    );
 
 // ==================== HELPERS ====================
 
 String _extractError(DioException e) {
   if (e.response?.data != null) {
     final data = e.response!.data;
-    if (data is Map) return data['message'] ?? data['error'] ?? 'Request failed';
+    if (data is Map)
+      return data['message'] ?? data['error'] ?? 'Request failed';
     if (data is String) return data;
   }
   return e.message ?? 'Something went wrong';
@@ -687,16 +781,32 @@ String _extractError(DioException e) {
 
 List<Map<String, dynamic>> _extractList(dynamic data) {
   if (data == null) return [];
-  if (data is List) return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  if (data is List)
+    return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   if (data is Map) {
     // Try common keys in order of priority
     for (final key in [
-      'data', 'appointments', 'patients', 'tests', 'labTests', 'orders', 'commissions',
-      'results', 'sales', 'medicines', 'invoices', 'prescriptions', 'batches',
-      'exercises', 'labTests', 'items'
+      'data',
+      'appointments',
+      'patients',
+      'tests',
+      'labTests',
+      'orders',
+      'commissions',
+      'results',
+      'sales',
+      'medicines',
+      'invoices',
+      'prescriptions',
+      'batches',
+      'exercises',
+      'labTests',
+      'items',
     ]) {
       if (data[key] is List) {
-        return (data[key] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        return (data[key] as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
       }
     }
   }

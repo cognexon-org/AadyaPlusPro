@@ -4,7 +4,9 @@ class FieldLocationService {
   static Future<Map<String, dynamic>> currentPayload() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
     if (!enabled) {
-      throw StateError('Location services are disabled. Turn on GPS and try again.');
+      throw StateError(
+        'Location services are disabled. Turn on GPS and try again.',
+      );
     }
 
     var permission = await Geolocator.checkPermission();
@@ -13,7 +15,9 @@ class FieldLocationService {
     }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      throw StateError('Location permission is required for field attendance and DCR check-in.');
+      throw StateError(
+        'Location permission is required for field attendance and DCR check-in.',
+      );
     }
 
     final position = await Geolocator.getCurrentPosition(

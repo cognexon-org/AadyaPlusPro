@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/stat_card.dart';
@@ -60,16 +60,16 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Welcome back 👋', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+                          Text('Welcome back 👋', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
                           const SizedBox(height: 4),
-                          Text(user?.name ?? 'Physiotherapist', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                          Text(user?.name ?? 'Physiotherapist', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                         ],
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-                      child: Badge(smallSize: 8, child: const Icon(Iconsax.notification, size: 22, color: AppTheme.textPrimary)),
+                      child: Badge(smallSize: 8, child: const Icon(CupertinoIcons.bell, size: 22, color: AppTheme.textPrimary)),
                     ),
                   ],
                 ),
@@ -83,10 +83,10 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                     crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.3,
                     children: [
-                      StatCard(title: 'Upcoming', value: _fmt(upcoming), icon: Iconsax.calendar_tick, color: AppTheme.physioAccent),
-                      StatCard(title: 'Earnings', value: _fmtCurrency(earnings), icon: Iconsax.money_recive, color: AppTheme.success),
-                      StatCard(title: 'Patients', value: _fmt(patients), icon: Iconsax.people, color: AppTheme.accent),
-                      StatCard(title: 'Home Visits', value: _fmt(homeVisits), icon: Iconsax.home, color: AppTheme.warning),
+                      StatCard(title: 'Upcoming', value: _fmt(upcoming), icon: CupertinoIcons.calendar_badge_plus, color: AppTheme.physioAccent),
+                      StatCard(title: 'Earnings', value: _fmtCurrency(earnings), icon: CupertinoIcons.money_dollar_circle, color: AppTheme.success),
+                      StatCard(title: 'Patients', value: _fmt(patients), icon: CupertinoIcons.person_2, color: AppTheme.accent),
+                      StatCard(title: 'Home Visits', value: _fmt(homeVisits), icon: CupertinoIcons.house, color: AppTheme.warning),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -101,11 +101,11 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Weekly Performance', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                            Text('Weekly Performance', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                             Container(
                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                decoration: BoxDecoration(color: AppTheme.physioAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                               child: Text('This Week', style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.physioAccent)),
+                               child: Text('This Week', style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.physioAccent)),
                             ),
                           ],
                         ),
@@ -118,7 +118,7 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                               bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, _) {
                                 const d = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                                 if (v.toInt() >= 0 && v.toInt() < 7) {
-                                  return Padding(padding: const EdgeInsets.only(top: 8), child: Text(d[v.toInt()], style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)));
+                                  return Padding(padding: const EdgeInsets.only(top: 8), child: Text(d[v.toInt()], style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)));
                                 }
                                 return const SizedBox();
                               }, reservedSize: 28)),
@@ -142,14 +142,14 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                   const SizedBox(height: 24),
 
                   // Quick Actions
-                  Text('Quick Actions', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                  Text('Quick Actions', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                   const SizedBox(height: 12),
                   Row(children: [
-                    Expanded(child: _quickAction(Iconsax.calendar, 'Availability', AppTheme.physioAccent, () {
+                    Expanded(child: _quickAction(CupertinoIcons.calendar, 'Availability', AppTheme.physioAccent, () {
                       Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioAvailability()));
                     })),
                     const SizedBox(width: 12),
-                    Expanded(child: _quickAction(Iconsax.activity, 'Exercises', AppTheme.primary, () {
+                    Expanded(child: _quickAction(CupertinoIcons.waveform_path, 'Exercises', AppTheme.primary, () {
                       Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioExercises()));
                     })),
                   ]),
@@ -159,12 +159,12 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Upcoming Sessions', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                      Text('Upcoming Sessions', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                       TextButton(
                         onPressed: () {
                            Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioAppointments()));
                         }, 
-                        child: Text('View All', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.physioAccent)),
+                        child: Text('View All', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.physioAccent)),
                       ),
                     ],
                   ),
@@ -201,7 +201,7 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
     return Row(children: [
       Container(width: 8, height: 8, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
       const SizedBox(width: 6),
-      Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textSecondary)),
+      Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
     ]);
   }
 
@@ -215,7 +215,7 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
         child: Column(children: [
           Icon(icon, size: 24, color: color),
           const SizedBox(height: 8),
-          Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: color), textAlign: TextAlign.center),
+          Text(label, style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: color), textAlign: TextAlign.center),
         ]),
       ),
     );
@@ -229,9 +229,9 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
         child: Column(
           children: [
-            Icon(Iconsax.calendar, size: 32, color: AppTheme.textTertiary.withValues(alpha: 0.3)),
+            Icon(CupertinoIcons.calendar, size: 32, color: AppTheme.textTertiary.withValues(alpha: 0.3)),
             const SizedBox(height: 12),
-            Text('No upcoming sessions', style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+            Text('No upcoming sessions', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
           ],
         ),
       )];
@@ -256,24 +256,24 @@ class _PhysioHomeState extends ConsumerState<PhysioHome> {
             Container(
               width: 48, height: 48,
               decoration: BoxDecoration(gradient: AppTheme.physioGradient, borderRadius: BorderRadius.circular(14)),
-              child: Center(child: Text(name[0], style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white))),
+              child: Center(child: Text(name[0], style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white))),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+              Text(name, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
               const SizedBox(height: 2),
               Row(
                 children: [
-                  Icon(type == 'home' ? Iconsax.home : Iconsax.hospital, size: 12, color: AppTheme.textTertiary),
+                  Icon(type == 'home' ? CupertinoIcons.house : Icons.local_hospital_outlined, size: 12, color: AppTheme.textTertiary),
                   const SizedBox(width: 4),
-                  Text('$time • ${type.toUpperCase()}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+                  Text('$time • ${type.toUpperCase()}', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
                 ],
               ),
             ])),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-              child: Text(status.toUpperCase(), style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
+              child: Text(status.toUpperCase(), style: GoogleFonts.manrope(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
             ),
           ]),
         ),

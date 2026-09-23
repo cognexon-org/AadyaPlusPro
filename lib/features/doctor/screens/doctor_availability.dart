@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 
@@ -95,7 +95,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text('My Availability', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text('My Availability', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
       ),
       body: _loading 
@@ -115,7 +115,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
           child: ElevatedButton(
             onPressed: _saving ? null : _save,
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text('Save Availability', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+            child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text('Save Availability', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
           ),
         ),
       ),
@@ -132,7 +132,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
       child: Column(children: [
         ListTile(
-          title: Text(day[0].toUpperCase() + day.substring(1), style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+          title: Text(day[0].toUpperCase() + day.substring(1), style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
           trailing: Switch(
             value: isEnabled,
             onChanged: (v) {
@@ -149,8 +149,8 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
           ...slots.asMap().entries.map((entry) => _buildSlotRow(day, entry.key, entry.value)),
           TextButton.icon(
             onPressed: () => _addSlot(day),
-            icon: const Icon(Iconsax.add_circle, size: 18),
-            label: Text('Add Slot', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600)),
+            icon: const Icon(CupertinoIcons.add_circled, size: 18),
+            label: Text('Add Slot', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(height: 8),
         ],
@@ -166,7 +166,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
           Expanded(child: _buildTimePicker(day, index, 'startTime')),
           const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('to')),
           Expanded(child: _buildTimePicker(day, index, 'endTime')),
-          IconButton(onPressed: () => _removeSlot(day, index), icon: const Icon(Iconsax.trash, size: 18, color: AppTheme.error)),
+          IconButton(onPressed: () => _removeSlot(day, index), icon: const Icon(CupertinoIcons.trash, size: 18, color: AppTheme.error)),
         ]),
         const SizedBox(height: 8),
         Row(children: [
@@ -192,7 +192,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
-        child: Text(_availability[day]!['slots'][index][key], style: GoogleFonts.plusJakartaSans(fontSize: 13)),
+        child: Text(_availability[day]!['slots'][index][key], style: GoogleFonts.manrope(fontSize: 13)),
       ),
     );
   }
@@ -205,7 +205,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
         child: DropdownButton<String>(
           value: _availability[day]!['slots'][index]['type'],
           isExpanded: true,
-          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textPrimary),
+          style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textPrimary),
           items: const [
             DropdownMenuItem(value: 'clinic', child: Text('Clinic')),
             DropdownMenuItem(value: 'video', child: Text('Video')),
@@ -224,7 +224,7 @@ class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
       child: TextField(
         keyboardType: TextInputType.number,
         decoration: const InputDecoration(border: InputBorder.none, hintText: 'Max pts'),
-        style: GoogleFonts.plusJakartaSans(fontSize: 13),
+        style: GoogleFonts.manrope(fontSize: 13),
         controller: TextEditingController(text: _availability[day]!['slots'][index]['maxPatients'].toString())..selection = TextSelection.collapsed(offset: _availability[day]!['slots'][index]['maxPatients'].toString().length),
         onChanged: (v) => _availability[day]!['slots'][index]['maxPatients'] = int.tryParse(v) ?? 1,
       ),

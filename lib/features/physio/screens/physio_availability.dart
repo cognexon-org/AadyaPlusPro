@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_dialog.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../../../core/network/api_service.dart';
 
@@ -14,7 +15,15 @@ class PhysioAvailability extends ConsumerStatefulWidget {
 }
 
 class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
-  final List<String> _days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  final List<String> _days = [
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
+  ];
   Map<String, List<Map<String, dynamic>>> _availability = {};
   bool _isSaving = false;
 
@@ -31,12 +40,14 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
     for (final day in _days) {
       _availability[day] = [];
     }
-    
+
     if (availList != null) {
       for (final item in availList) {
         final day = item['day']?.toString().toLowerCase();
         if (day != null && _availability.containsKey(day)) {
-          _availability[day] = List<Map<String, dynamic>>.from(item['slots'] ?? []);
+          _availability[day] = List<Map<String, dynamic>>.from(
+            item['slots'] ?? [],
+          );
         }
       }
     }
@@ -49,16 +60,45 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: Text('Set Availability', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+        title: Text(
+          'Set Availability',
+          style: GoogleFonts.manrope(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
         centerTitle: true,
-        leading: IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Iconsax.arrow_left, color: AppTheme.textPrimary)),
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(CupertinoIcons.back, color: AppTheme.textPrimary),
+        ),
         actions: [
           if (_isSaving)
-            const Center(child: Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.physioAccent))))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.physioAccent,
+                  ),
+                ),
+              ),
+            )
           else
             TextButton(
               onPressed: _saveAvailability,
-              child: Text('Save', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.physioAccent)),
+              child: Text(
+                'Save',
+                style: GoogleFonts.manrope(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.physioAccent,
+                ),
+              ),
             ),
         ],
       ),
@@ -74,7 +114,11 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
     final slots = _availability[day] ?? [];
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+      ),
       child: Column(
         children: [
           Padding(
@@ -82,27 +126,66 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(day[0].toUpperCase() + day.substring(1), style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                Text(
+                  day[0].toUpperCase() + day.substring(1),
+                  style: GoogleFonts.manrope(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
                 GestureDetector(
                   onTap: () => _addSlot(day),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: AppTheme.physioAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                    child: Row(children: [
-                      const Icon(Iconsax.add, size: 14, color: AppTheme.physioAccent),
-                      const SizedBox(width: 4),
-                      Text('Add Slot', style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.physioAccent)),
-                    ]),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.physioAccent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          CupertinoIcons.add,
+                          size: 14,
+                          color: AppTheme.physioAccent,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Add Slot',
+                          style: GoogleFonts.manrope(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.physioAccent,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
           if (slots.isEmpty)
-            Padding(padding: const EdgeInsets.only(bottom: 20), child: Text('No slots added - Unavailable', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textTertiary)))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Text(
+                'No slots added - Unavailable',
+                style: GoogleFonts.manrope(
+                  fontSize: 12,
+                  color: AppTheme.textTertiary,
+                ),
+              ),
+            )
           else
             Column(
-              children: slots.asMap().entries.map((entry) => _slotRow(day, entry.key, entry.value)).toList(),
+              children: slots
+                  .asMap()
+                  .entries
+                  .map((entry) => _slotRow(day, entry.key, entry.value))
+                  .toList(),
             ),
         ],
       ),
@@ -114,15 +197,35 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         children: [
-          Icon(type == 'home' ? Iconsax.home : Iconsax.building, size: 16, color: AppTheme.textSecondary),
+          Icon(
+            type == 'home' ? CupertinoIcons.house : Icons.apartment_outlined,
+            size: 16,
+            color: AppTheme.textSecondary,
+          ),
           const SizedBox(width: 12),
-          Expanded(child: Text('${slot['startTime']} - ${slot['endTime']}', style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textPrimary))),
+          Expanded(
+            child: Text(
+              '${slot['startTime']} - ${slot['endTime']}',
+              style: GoogleFonts.manrope(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
           GestureDetector(
             onTap: () => _removeSlot(day, index),
-            child: const Icon(Iconsax.trash, size: 16, color: AppTheme.error),
+            child: const Icon(
+              CupertinoIcons.trash,
+              size: 16,
+              color: AppTheme.error,
+            ),
           ),
         ],
       ),
@@ -130,31 +233,106 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
   }
 
   void _addSlot(String day) async {
-    final TimeOfDay? start = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 9, minute: 0));
+    final TimeOfDay? start = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 9, minute: 0),
+    );
     if (start == null) return;
-    
-    final TimeOfDay? end = await showTimePicker(context: context, initialTime: TimeOfDay(hour: (start.hour + 1) % 24, minute: start.minute));
+
+    final TimeOfDay? end = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: (start.hour + 1) % 24, minute: start.minute),
+    );
     if (end == null) return;
 
-    final type = await showDialog<String>(context: context, builder: (c) => AlertDialog(
-      title: Text('Select Visit Type', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold)),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(title: const Text('Clinic'), onTap: () => Navigator.pop(c, 'clinic')),
-        ListTile(title: const Text('Home Visit'), onTap: () => Navigator.pop(c, 'home')),
-        ListTile(title: const Text('Both (Clinic & Home)'), onTap: () => Navigator.pop(c, 'both')),
-      ]),
-    ));
+    Widget option(IconData icon, String label, String value) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.pop(context, value),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppTheme.physioAccent.withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 15, color: AppTheme.physioAccent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 15,
+                  color: AppTheme.textTertiary,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final type = await AppDialog.show<String>(
+      context,
+      title: 'Select Visit Type',
+      subtitle: 'How will this slot be delivered?',
+      icon: CupertinoIcons.location_solid,
+      accentColor: AppTheme.physioAccent,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          option(CupertinoIcons.building_2_fill, 'Clinic', 'clinic'),
+          option(CupertinoIcons.house_fill, 'Home Visit', 'home'),
+          option(
+            CupertinoIcons.arrow_2_squarepath,
+            'Both (Clinic & Home)',
+            'both',
+          ),
+        ],
+      ),
+    );
 
     if (type != null) {
       setState(() {
-        final st = '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
-        final et = '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-        
+        final st =
+            '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
+        final et =
+            '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
+
         if (type == 'both') {
-          _availability[day]!.add({ 'startTime': st, 'endTime': et, 'type': 'clinic' });
-          _availability[day]!.add({ 'startTime': st, 'endTime': et, 'type': 'home' });
+          _availability[day]!.add({
+            'startTime': st,
+            'endTime': et,
+            'type': 'clinic',
+          });
+          _availability[day]!.add({
+            'startTime': st,
+            'endTime': et,
+            'type': 'home',
+          });
         } else {
-          _availability[day]!.add({ 'startTime': st, 'endTime': et, 'type': type });
+          _availability[day]!.add({
+            'startTime': st,
+            'endTime': et,
+            'type': type,
+          });
         }
       });
     }
@@ -169,20 +347,23 @@ class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
   Future<void> _saveAvailability() async {
     setState(() => _isSaving = true);
     try {
-      final formatted = _availability.entries.map((e) => {
-        'day': e.key,
-        'slots': e.value,
-      }).toList();
+      final formatted = _availability.entries
+          .map((e) => {'day': e.key, 'slots': e.value})
+          .toList();
 
       await ApiService().updatePhysioAvailability({'availability': formatted});
       await ref.read(physioDashboardProvider.notifier).loadProfile();
-      
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Availability updated successfully')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Availability updated successfully')),
+        );
       }
     } catch (e) {
-       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _isSaving = false);

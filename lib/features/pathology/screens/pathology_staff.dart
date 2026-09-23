@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/network/api_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_dialog.dart';
+import '../../../shared/widgets/app_form_fields.dart';
 
 class PathologyStaffScreen extends StatefulWidget {
   const PathologyStaffScreen({super.key});
@@ -13,46 +16,184 @@ class _PathologyStaffScreenState extends State<PathologyStaffScreen> {
   bool _loading = false;
   List<Map<String, dynamic>> _staff = [];
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
-    try { final r = await ApiService().getDiagnosticsStaff(); final d = Map<String, dynamic>.from(r.data as Map); if (mounted) setState(() => _staff = (d['staff'] as List? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList()); }
-    catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'))); }
-    finally { if (mounted) setState(() => _loading = false); }
+    try {
+      final r = await ApiService().getDiagnosticsStaff();
+      final d = Map<String, dynamic>.from(r.data as Map);
+      if (mounted)
+        setState(
+          () => _staff = (d['staff'] as List? ?? const [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList(),
+        );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _create() async {
-    final name = TextEditingController(), phone = TextEditingController(), code = TextEditingController(), pins = TextEditingController(); String role = 'phlebotomist';
-    final ok = await showDialog<bool>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setS) => AlertDialog(title: const Text('Add Diagnostics Staff'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      TextField(controller: name, decoration: const InputDecoration(labelText: 'Name *')),
-      TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone *')),
-      TextField(controller: code, decoration: const InputDecoration(labelText: 'Employee code')),
-      DropdownButtonFormField<String>(value: role, items: const [DropdownMenuItem(value: 'phlebotomist', child: Text('Phlebotomist')), DropdownMenuItem(value: 'technician', child: Text('Technician')), DropdownMenuItem(value: 'receptionist', child: Text('Receptionist'))], onChanged: (v) => setS(() => role = v ?? role), decoration: const InputDecoration(labelText: 'Role')),
-      TextField(controller: pins, decoration: const InputDecoration(labelText: 'Service pincodes, comma separated')),
-    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add'))])));
-    if (ok != true || name.text.trim().isEmpty || phone.text.trim().isEmpty) return;
+    final name = TextEditingController(),
+        phone = TextEditingController(),
+        code = TextEditingController(),
+        pins = TextEditingController();
+    String role = 'phlebotomist';
+    final ok = await AppDialog.show<bool>(
+      context,
+      title: 'Add Diagnostics Staff',
+      subtitle: 'Add a phlebotomist, technician or receptionist',
+      icon: CupertinoIcons.person_add,
+      content: StatefulBuilder(
+        builder: (ctx, setS) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppTextField(
+              label: 'Name',
+              controller: name,
+              icon: CupertinoIcons.person,
+              required: true,
+            ),
+            AppTextField(
+              label: 'Phone',
+              controller: phone,
+              icon: CupertinoIcons.phone,
+              isNum: true,
+              required: true,
+            ),
+            AppTextField(
+              label: 'Employee code',
+              controller: code,
+              icon: CupertinoIcons.number,
+            ),
+            AppDropdownField<String>(
+              label: 'Role',
+              value: role,
+              icon: CupertinoIcons.square_grid_2x2,
+              items: const [
+                DropdownMenuItem(
+                  value: 'phlebotomist',
+                  child: Text('Phlebotomist'),
+                ),
+                DropdownMenuItem(
+                  value: 'technician',
+                  child: Text('Technician'),
+                ),
+                DropdownMenuItem(
+                  value: 'receptionist',
+                  child: Text('Receptionist'),
+                ),
+              ],
+              onChanged: (v) => setS(() => role = v ?? role),
+            ),
+            AppTextField(
+              label: 'Service pincodes',
+              controller: pins,
+              icon: CupertinoIcons.location,
+              hint: 'Comma separated',
+              margin: EdgeInsets.zero,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        AppDialog.cancelButton(context),
+        AppDialog.primaryButton('Add', () => Navigator.pop(context, true)),
+      ],
+    );
+    if (ok != true || name.text.trim().isEmpty || phone.text.trim().isEmpty)
+      return;
     try {
-      await ApiService().createDiagnosticsStaff({'name': name.text.trim(), 'phone': phone.text.trim(), 'role': role, if (code.text.trim().isNotEmpty) 'employeeCode': code.text.trim(), 'servicePincodes': pins.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList()});
+      await ApiService().createDiagnosticsStaff({
+        'name': name.text.trim(),
+        'phone': phone.text.trim(),
+        'role': role,
+        if (code.text.trim().isNotEmpty) 'employeeCode': code.text.trim(),
+        'servicePincodes': pins.text
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList(),
+      });
       await _load();
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'))); }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
-  Future<void> _deactivate(Map<String, dynamic> s) async { try { await ApiService().deleteDiagnosticsStaff('${s['_id']}'); await _load(); } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'))); } }
+  Future<void> _deactivate(Map<String, dynamic> s) async {
+    try {
+      await ApiService().deleteDiagnosticsStaff('${s['_id']}');
+      await _load();
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppTheme.surface, appBar: AppBar(title: const Text('Diagnostics Staff')),
-    floatingActionButton: FloatingActionButton.extended(onPressed: _create, icon: const Icon(Icons.person_add_alt_1), label: const Text('Add staff')),
-    body: RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
-      if (_loading) const LinearProgressIndicator(),
-      if (!_loading && _staff.isEmpty) const Padding(padding: EdgeInsets.all(30), child: Center(child: Text('No staff configured.'))),
-      ..._staff.map((s) => Card(child: ListTile(
-        leading: CircleAvatar(child: Text('${s['name'] ?? '?'}'.substring(0, 1).toUpperCase())),
-        title: Text('${s['name'] ?? 'Staff'}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-        subtitle: Text('${s['role'] ?? ''} • ${s['phone'] ?? ''}\n${(s['servicePincodes'] as List? ?? const []).join(', ')}'), isThreeLine: true,
-        trailing: s['isActive'] == false ? const Text('Inactive') : IconButton(onPressed: () => _deactivate(s), icon: const Icon(Icons.person_off_outlined)),
-      ))),
-      const SizedBox(height: 80),
-    ])),
+    backgroundColor: AppTheme.surface,
+    appBar: AppBar(title: const Text('Diagnostics Staff')),
+    floatingActionButton: FloatingActionButton.extended(
+      onPressed: _create,
+      icon: const Icon(Icons.person_add_alt_1),
+      label: const Text('Add staff'),
+    ),
+    body: RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_loading) const LinearProgressIndicator(),
+          if (!_loading && _staff.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(30),
+              child: Center(child: Text('No staff configured.')),
+            ),
+          ..._staff.map(
+            (s) => Card(
+              child: ListTile(
+                leading: CircleAvatar(
+                  child: Text(
+                    '${s['name'] ?? '?'}'.substring(0, 1).toUpperCase(),
+                  ),
+                ),
+                title: Text(
+                  '${s['name'] ?? 'Staff'}',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  '${s['role'] ?? ''} • ${s['phone'] ?? ''}\n${(s['servicePincodes'] as List? ?? const []).join(', ')}',
+                ),
+                isThreeLine: true,
+                trailing: s['isActive'] == false
+                    ? const Text('Inactive')
+                    : IconButton(
+                        onPressed: () => _deactivate(s),
+                        icon: const Icon(Icons.person_off_outlined),
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 80),
+        ],
+      ),
+    ),
   );
 }

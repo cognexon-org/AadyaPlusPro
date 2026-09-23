@@ -1,20 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/gradient_button.dart';
 import '../../auth/models/user_model.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key});
+  /// Set when arriving from the OTP screen, where the number was already
+  /// confirmed by SMS.
+  final String? prefilledPhone;
+
+  /// Single-use proof from /auth/otp/verify that [prefilledPhone] belongs to
+  /// this person. The server redeems it once, which is what stops one verified
+  /// number being used to open several accounts.
+  final String? phoneVerificationToken;
+
+  const RegisterScreen({
+    super.key,
+    this.prefilledPhone,
+    this.phoneVerificationToken,
+  });
 
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
 }
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // A number confirmed by SMS should not then be editable — the token is
+    // bound to it, and changing the field would only fail at submit.
+    if (widget.prefilledPhone != null) {
+      _phoneController.text = widget.prefilledPhone!;
+    }
+  }
+
   final _pageController = PageController();
   int _currentStep = 0;
   final int _totalSteps = 4;
@@ -26,6 +49,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
+
+  bool get _phoneAlreadyVerified =>
+      (widget.phoneVerificationToken ?? '').isNotEmpty;
   final _passwordController = TextEditingController();
   String _gender = '';
   DateTime? _dob;
@@ -112,6 +138,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       phone: phone,
       password: password,
       role: _selectedRole!,
+      verificationToken: widget.phoneVerificationToken,
     );
 
     if (!mounted) return;
@@ -133,7 +160,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Registration successful. Please sign in to complete your profile.'),
+          content: Text(
+            'Registration successful. Please sign in to complete your profile.',
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -141,8 +170,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       return;
     }
 
-    final profileCompleted =
-        await authNotifier.completeProfile(_buildProfessionalProfilePayload());
+    final profileCompleted = await authNotifier.completeProfile(
+      _buildProfessionalProfilePayload(),
+    );
     if (!mounted) return;
 
     if (!profileCompleted) {
@@ -158,7 +188,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       return;
     }
 
-    Navigator.of(context).pushNamedAndRemoveUntil('/pending', (r) => false);
+    // Registration + profile completion just succeeded, so profileCompleted
+    // is true — go straight to the dashboard. Admin verification (separately
+    // tracked) only affects public discoverability, not the professional's
+    // own access to their dashboard/store/inventory.
+    Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
   }
 
   String? _registrationValidationError() {
@@ -178,8 +212,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     }
     if (_selectedRole == UserRole.doctor ||
         _selectedRole == UserRole.physiotherapist) {
-      final consultationFee =
-          num.tryParse(_consultationFeeController.text.trim());
+      final consultationFee = num.tryParse(
+        _consultationFeeController.text.trim(),
+      );
       if (consultationFee == null || consultationFee <= 0) {
         return 'Enter a valid consultation fee.';
       }
@@ -218,8 +253,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         int.tryParse(_experienceController.text.trim()) ?? 0;
     final consultationFee =
         num.tryParse(_consultationFeeController.text.trim()) ?? 0;
-    final homeVisitFee =
-        num.tryParse(_homeVisitFeeController.text.trim()) ?? 0;
+    final homeVisitFee = num.tryParse(_homeVisitFeeController.text.trim()) ?? 0;
 
     switch (role) {
       case UserRole.doctor:
@@ -299,7 +333,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 children: [
                   IconButton(
                     onPressed: _prevStep,
-                    icon: const Icon(Iconsax.arrow_left, color: AppTheme.textPrimary),
+                    icon: const Icon(
+                      CupertinoIcons.back,
+                      color: AppTheme.textPrimary,
+                    ),
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
@@ -315,7 +352,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       children: [
                         Text(
                           'Step ${_currentStep + 1} of $_totalSteps',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                             color: AppTheme.textTertiary,
@@ -324,7 +361,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         const SizedBox(height: 2),
                         Text(
                           _getStepTitle(),
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: AppTheme.textPrimary,
@@ -401,7 +438,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         children: [
           Text(
             'What type of healthcare professional are you?',
-            style: GoogleFonts.plusJakartaSans(
+            style: GoogleFonts.manrope(
               fontSize: 15,
               color: AppTheme.textSecondary,
             ),
@@ -409,7 +446,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           const SizedBox(height: 24),
           _buildRoleCard(
             UserRole.doctor,
-            Iconsax.health,
+            Icons.medical_services_outlined,
             'Doctor',
             'General Physician, Specialist, Surgeon, etc.',
             AppTheme.doctorAccent,
@@ -417,7 +454,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           const SizedBox(height: 12),
           _buildRoleCard(
             UserRole.physiotherapist,
-            Iconsax.activity,
+            CupertinoIcons.waveform_path,
             'Physiotherapist',
             'Physical therapist, Rehabilitation specialist',
             AppTheme.physioAccent,
@@ -425,7 +462,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           const SizedBox(height: 12),
           _buildRoleCard(
             UserRole.pathology,
-            Iconsax.microscope,
+            Icons.biotech_outlined,
             'Pathology Lab',
             'Diagnostic center, Testing laboratory',
             AppTheme.pathologyAccent,
@@ -433,7 +470,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           const SizedBox(height: 12),
           _buildRoleCard(
             UserRole.pharmacy,
-            Iconsax.building,
+            Icons.apartment_outlined,
             'Pharmacy',
             'Medical store, Pharmacy chain, Online pharmacy',
             AppTheme.pharmacyAccent,
@@ -441,7 +478,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           const SizedBox(height: 32),
           GradientButton(
             text: 'Continue',
-            icon: Iconsax.arrow_right_3,
+            icon: CupertinoIcons.chevron_right,
             onPressed: _selectedRole != null ? _nextStep : () {},
           ),
         ],
@@ -449,7 +486,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     );
   }
 
-  Widget _buildRoleCard(UserRole role, IconData icon, String title, String subtitle, Color color) {
+  Widget _buildRoleCard(
+    UserRole role,
+    IconData icon,
+    String title,
+    String subtitle,
+    Color color,
+  ) {
     final isSelected = _selectedRole == role;
     return GestureDetector(
       onTap: () => setState(() => _selectedRole = role),
@@ -469,7 +512,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     color: color.withValues(alpha: 0.15),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
-                  )
+                  ),
                 ]
               : null,
         ),
@@ -490,7 +533,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 children: [
                   Text(
                     title,
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary,
@@ -499,7 +542,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 12,
                       color: AppTheme.textSecondary,
                     ),
@@ -537,7 +580,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         children: [
           Text(
             'Tell us about yourself',
-            style: GoogleFonts.plusJakartaSans(fontSize: 15, color: AppTheme.textSecondary),
+            style: GoogleFonts.manrope(
+              fontSize: 15,
+              color: AppTheme.textSecondary,
+            ),
           ),
           const SizedBox(height: 24),
 
@@ -548,7 +594,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Enter your full name',
               prefixIcon: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.user, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.person,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -562,7 +612,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Enter your email',
               prefixIcon: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.sms, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.mail,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -572,11 +626,29 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           TextField(
             controller: _phoneController,
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
+            // Locked when it arrived verified: the token from the OTP step is
+            // bound to this exact number, so editing it here could only fail
+            // at submit time.
+            readOnly: _phoneAlreadyVerified,
+            decoration: InputDecoration(
+              suffixIcon: _phoneAlreadyVerified
+                  ? const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: Icon(
+                        CupertinoIcons.checkmark_seal_fill,
+                        size: 18,
+                        color: AppTheme.success,
+                      ),
+                    )
+                  : null,
               hintText: 'Enter your phone number',
               prefixIcon: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.call, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.phone,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -593,7 +665,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     margin: const EdgeInsets.only(right: 8),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primary.withValues(alpha: 0.1) : Colors.white,
+                      color: isSelected
+                          ? AppTheme.primary.withValues(alpha: 0.1)
+                          : Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected ? AppTheme.primary : AppTheme.divider,
@@ -602,10 +676,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     child: Center(
                       child: Text(
                         g,
-                        style: GoogleFonts.plusJakartaSans(
+                        style: GoogleFonts.manrope(
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                          color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: isSelected
+                              ? AppTheme.primary
+                              : AppTheme.textSecondary,
                         ),
                       ),
                     ),
@@ -636,15 +714,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Iconsax.calendar, size: 20, color: AppTheme.primary),
+                  const Icon(
+                    CupertinoIcons.calendar,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
                   const SizedBox(width: 12),
                   Text(
                     _dob != null
                         ? '${_dob!.day}/${_dob!.month}/${_dob!.year}'
                         : 'Select date of birth',
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 14,
-                      color: _dob != null ? AppTheme.textPrimary : AppTheme.textTertiary,
+                      color: _dob != null
+                          ? AppTheme.textPrimary
+                          : AppTheme.textTertiary,
                     ),
                   ),
                 ],
@@ -661,13 +745,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Create a strong password',
               prefixIcon: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.lock, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.lock,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 32),
 
-          GradientButton(text: 'Continue', icon: Iconsax.arrow_right_3, onPressed: _nextStep),
+          GradientButton(
+            text: 'Continue',
+            icon: CupertinoIcons.chevron_right,
+            onPressed: _nextStep,
+          ),
         ],
       ),
     );
@@ -682,11 +774,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         children: [
           Text(
             'Professional information for ${_getRoleTitle()}',
-            style: GoogleFonts.plusJakartaSans(fontSize: 15, color: AppTheme.textSecondary),
+            style: GoogleFonts.manrope(
+              fontSize: 15,
+              color: AppTheme.textSecondary,
+            ),
           ),
           const SizedBox(height: 24),
 
-          if (_selectedRole == UserRole.doctor || _selectedRole == UserRole.physiotherapist) ...[
+          if (_selectedRole == UserRole.doctor ||
+              _selectedRole == UserRole.physiotherapist) ...[
             _buildLabel('Specialization'),
             TextField(
               controller: _specializationController,
@@ -696,31 +792,42 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     : 'e.g., Sports Physio, Neuro Physio',
                 prefixIcon: const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(Iconsax.medal_star, size: 20, color: AppTheme.primary),
+                  child: Icon(
+                    Icons.workspace_premium_outlined,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
           ],
 
-          _buildLabel(_selectedRole == UserRole.pathology
-              ? 'Lab License Number'
-              : _selectedRole == UserRole.pharmacy
-                  ? 'Drug License Number'
-                  : 'Medical License Number'),
+          _buildLabel(
+            _selectedRole == UserRole.pathology
+                ? 'Lab License Number'
+                : _selectedRole == UserRole.pharmacy
+                ? 'Drug License Number'
+                : 'Medical License Number',
+          ),
           TextField(
             controller: _licenseController,
             decoration: InputDecoration(
               hintText: 'Enter license number',
               prefixIcon: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.document, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.doc,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 16),
 
-          if (_selectedRole == UserRole.doctor || _selectedRole == UserRole.physiotherapist) ...[
+          if (_selectedRole == UserRole.doctor ||
+              _selectedRole == UserRole.physiotherapist) ...[
             _buildLabel('Years of Experience'),
             TextField(
               controller: _experienceController,
@@ -729,14 +836,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 hintText: 'Enter years of experience',
                 prefixIcon: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(Iconsax.briefcase, size: 20, color: AppTheme.primary),
+                  child: Icon(
+                    CupertinoIcons.briefcase,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
           ],
 
-          if (_selectedRole == UserRole.doctor || _selectedRole == UserRole.physiotherapist) ...[
+          if (_selectedRole == UserRole.doctor ||
+              _selectedRole == UserRole.physiotherapist) ...[
             _buildLabel('Consultation Fee (INR)'),
             TextField(
               controller: _consultationFeeController,
@@ -745,7 +857,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 hintText: 'e.g., 500',
                 prefixIcon: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(Iconsax.wallet_2, size: 20, color: AppTheme.primary),
+                  child: Icon(
+                    Icons.account_balance_wallet_outlined,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
             ),
@@ -761,29 +877,39 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 hintText: 'e.g., 800',
                 prefixIcon: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(Iconsax.home_2, size: 20, color: AppTheme.primary),
+                  child: Icon(
+                    CupertinoIcons.house,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
           ],
 
-          _buildLabel(_selectedRole == UserRole.pathology
-              ? 'Lab Name'
-              : _selectedRole == UserRole.pharmacy
-                  ? 'Pharmacy Name'
-                  : 'Clinic / Hospital Name'),
+          _buildLabel(
+            _selectedRole == UserRole.pathology
+                ? 'Lab Name'
+                : _selectedRole == UserRole.pharmacy
+                ? 'Pharmacy Name'
+                : 'Clinic / Hospital Name',
+          ),
           TextField(
             controller: _clinicNameController,
             decoration: InputDecoration(
               hintText: _selectedRole == UserRole.pathology
                   ? 'Enter lab name'
                   : _selectedRole == UserRole.pharmacy
-                      ? 'Enter pharmacy name'
-                      : 'Enter clinic name',
+                  ? 'Enter pharmacy name'
+                  : 'Enter clinic name',
               prefixIcon: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.building, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  Icons.apartment_outlined,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -797,7 +923,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Enter full address',
               prefixIcon: Padding(
                 padding: EdgeInsets.only(left: 14, right: 14, bottom: 24),
-                child: Icon(Iconsax.location, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.location,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -842,7 +972,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Enter pincode',
               prefixIcon: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(Iconsax.map, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.map,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -856,13 +990,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               hintText: 'Tell patients about your practice...',
               prefixIcon: const Padding(
                 padding: EdgeInsets.only(left: 14, right: 14, bottom: 48),
-                child: Icon(Iconsax.info_circle, size: 20, color: AppTheme.primary),
+                child: Icon(
+                  CupertinoIcons.info_circle,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 32),
 
-          GradientButton(text: 'Continue', icon: Iconsax.arrow_right_3, onPressed: _nextStep),
+          GradientButton(
+            text: 'Continue',
+            icon: CupertinoIcons.chevron_right,
+            onPressed: _nextStep,
+          ),
         ],
       ),
     );
@@ -885,13 +1027,16 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Iconsax.shield_tick, color: AppTheme.primary),
+                const Icon(
+                  CupertinoIcons.checkmark_shield,
+                  color: AppTheme.primary,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'Your license number and professional details will be submitted for verification. '
                     'The verification team may request supporting identity or qualification documents before approval.',
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.manrope(
                       fontSize: 13,
                       height: 1.5,
                       color: AppTheme.textSecondary,
@@ -909,18 +1054,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             decoration: BoxDecoration(
               color: AppTheme.primary.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.15)),
+              border: Border.all(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Iconsax.info_circle, size: 20, color: AppTheme.primary),
+                    const Icon(
+                      CupertinoIcons.info_circle,
+                      size: 20,
+                      color: AppTheme.primary,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'What happens next?',
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.manrope(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
@@ -929,13 +1080,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _buildInfoStep('1', 'Your profile will be reviewed by our admin team'),
+                _buildInfoStep(
+                  '1',
+                  'Your profile will be reviewed by our admin team',
+                ),
                 const SizedBox(height: 8),
                 _buildInfoStep('2', 'Verification typically takes 24-48 hours'),
                 const SizedBox(height: 8),
                 _buildInfoStep('3', 'You\'ll be notified once approved'),
                 const SizedBox(height: 8),
-                _buildInfoStep('4', 'Start accepting appointments & grow your practice'),
+                _buildInfoStep(
+                  '4',
+                  'Start accepting appointments & grow your practice',
+                ),
               ],
             ),
           ),
@@ -951,10 +1108,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   width: 22,
                   height: 22,
                   decoration: BoxDecoration(
-                    color: _termsAccepted ? AppTheme.primary : Colors.transparent,
+                    color: _termsAccepted
+                        ? AppTheme.primary
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                      color: _termsAccepted ? AppTheme.primary : AppTheme.divider,
+                      color: _termsAccepted
+                          ? AppTheme.primary
+                          : AppTheme.divider,
                       width: 2,
                     ),
                   ),
@@ -967,11 +1128,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   child: Text.rich(
                     TextSpan(
                       text: 'I agree to the ',
-                      style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.textSecondary),
+                      style: GoogleFonts.manrope(
+                        fontSize: 13,
+                        color: AppTheme.textSecondary,
+                      ),
                       children: [
                         TextSpan(
                           text: 'Terms of Service',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.primary,
@@ -980,7 +1144,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         const TextSpan(text: ' and '),
                         TextSpan(
                           text: 'Privacy Policy',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.manrope(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.primary,
@@ -998,7 +1162,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
           GradientButton(
             text: 'Submit for Review',
-            icon: Iconsax.send_1,
+            icon: CupertinoIcons.paperplane,
             onPressed: _termsAccepted ? _submitRegistration : () {},
           ),
           const SizedBox(height: 16),
@@ -1021,7 +1185,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           child: Center(
             child: Text(
               number,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.primary,
@@ -1033,7 +1197,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         Expanded(
           child: Text(
             text,
-            style: GoogleFonts.plusJakartaSans(
+            style: GoogleFonts.manrope(
               fontSize: 13,
               color: AppTheme.textSecondary,
             ),
@@ -1048,7 +1212,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         label,
-        style: GoogleFonts.plusJakartaSans(
+        style: GoogleFonts.manrope(
           fontSize: 14,
           fontWeight: FontWeight.w600,
           color: AppTheme.textPrimary,

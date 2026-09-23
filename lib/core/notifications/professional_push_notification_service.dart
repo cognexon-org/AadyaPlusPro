@@ -20,14 +20,13 @@ const AndroidNotificationChannel _aadyaProChannel = AndroidNotificationChannel(
 FirebaseOptions? _firebaseOptionsFromEnvironment() {
   const genericApiKey = String.fromEnvironment('AADYA_FIREBASE_API_KEY');
   const genericAppId = String.fromEnvironment('AADYA_FIREBASE_APP_ID');
-  const androidApiKey =
-      String.fromEnvironment('AADYA_FIREBASE_ANDROID_API_KEY');
-  const androidAppId =
-      String.fromEnvironment('AADYA_FIREBASE_ANDROID_APP_ID');
+  const androidApiKey = String.fromEnvironment(
+    'AADYA_FIREBASE_ANDROID_API_KEY',
+  );
+  const androidAppId = String.fromEnvironment('AADYA_FIREBASE_ANDROID_APP_ID');
   const iosApiKey = String.fromEnvironment('AADYA_FIREBASE_IOS_API_KEY');
   const iosAppId = String.fromEnvironment('AADYA_FIREBASE_IOS_APP_ID');
-  const senderId =
-      String.fromEnvironment('AADYA_FIREBASE_MESSAGING_SENDER_ID');
+  const senderId = String.fromEnvironment('AADYA_FIREBASE_MESSAGING_SENDER_ID');
   const projectId = String.fromEnvironment('AADYA_FIREBASE_PROJECT_ID');
   const storageBucket = String.fromEnvironment('AADYA_FIREBASE_STORAGE_BUCKET');
   const iosBundleId = String.fromEnvironment('AADYA_FIREBASE_IOS_BUNDLE_ID');
@@ -42,8 +41,12 @@ FirebaseOptions? _firebaseOptionsFromEnvironment() {
     if (iosAppId.trim().isNotEmpty) appId = iosAppId;
   }
 
-  if ([apiKey, appId, senderId, projectId]
-      .any((value) => value.trim().isEmpty)) {
+  if ([
+    apiKey,
+    appId,
+    senderId,
+    projectId,
+  ].any((value) => value.trim().isEmpty)) {
     return null;
   }
 
@@ -123,7 +126,7 @@ class ProfessionalPushNotificationService {
       );
 
       await _local.initialize(
-        settings,
+        settings: settings,
         onDidReceiveNotificationResponse: (response) {
           final payload = response.payload;
           if (payload == null || payload.isEmpty) return;
@@ -140,7 +143,8 @@ class ProfessionalPushNotificationService {
 
       await _local
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.createNotificationChannel(_aadyaProChannel);
 
       final messaging = FirebaseMessaging.instance;
@@ -220,19 +224,15 @@ class ProfessionalPushNotificationService {
       final token =
           _currentToken ?? await FirebaseMessaging.instance.getToken();
       if (token == null || token.isEmpty) return;
-      await _api.unregisterDeviceToken({
-        'token': token,
-        'app': 'aadyapluspro',
-      });
+      await _api.unregisterDeviceToken({'token': token, 'app': 'aadyapluspro'});
     } catch (error) {
       debugPrint('Unable to unregister Aadya Pro push token: $error');
     }
   }
 
   Future<void> openNotificationData(Map<String, dynamic> data) async {
-    final notificationId = data['notificationId']?.toString() ??
-        data['_id']?.toString() ??
-        '';
+    final notificationId =
+        data['notificationId']?.toString() ?? data['_id']?.toString() ?? '';
     if (notificationId.isNotEmpty) {
       try {
         await _api.markNotificationRead(notificationId);
@@ -267,14 +267,15 @@ class ProfessionalPushNotificationService {
       ),
     );
 
-    final id = (message.messageId?.hashCode ??
+    final id =
+        (message.messageId?.hashCode ??
             DateTime.now().millisecondsSinceEpoch.hashCode) &
         0x7fffffff;
     await _local.show(
-      id,
-      title ?? 'Aadya Plus Professional',
-      body ?? '',
-      details,
+      id: id,
+      title: title ?? 'Aadya Plus Professional',
+      body: body ?? '',
+      notificationDetails: details,
       payload: jsonEncode(data),
     );
   }

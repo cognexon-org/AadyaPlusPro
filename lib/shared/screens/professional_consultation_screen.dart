@@ -1,10 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 
 import '../../core/network/api_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../widgets/app_dialog.dart';
 import '../../features/doctor/screens/doctor_prescriptions.dart';
 import '../../features/doctor/screens/prescription_details.dart';
 import 'app_web_view.dart';
@@ -15,10 +16,7 @@ import 'app_web_view.dart';
 class ProfessionalConsultationScreen extends StatefulWidget {
   final Map<String, dynamic> appointment;
 
-  const ProfessionalConsultationScreen({
-    super.key,
-    required this.appointment,
-  });
+  const ProfessionalConsultationScreen({super.key, required this.appointment});
 
   @override
   State<ProfessionalConsultationScreen> createState() =>
@@ -113,7 +111,8 @@ class _ProfessionalConsultationScreenState
       _adviceController.text = summary['advice']?.toString() ?? '';
     }
     if (_followUpNotesController.text.isEmpty) {
-      _followUpNotesController.text = summary['followUpNotes']?.toString() ?? '';
+      _followUpNotesController.text =
+          summary['followUpNotes']?.toString() ?? '';
     }
     _outcome = summary['outcome']?.toString() ?? _outcome;
     _followUpRequired = summary['followUpRequired'] == true;
@@ -170,16 +169,16 @@ class _ProfessionalConsultationScreenState
   }
 
   Map<String, dynamic> _summaryPayload() => {
-        'chiefComplaint': _csv(_chiefComplaintController.text),
-        'diagnosis': _csv(_diagnosisController.text),
-        'notes': _notesController.text.trim(),
-        'advice': _adviceController.text.trim(),
-        'outcome': _outcome,
-        'followUpRequired': _followUpRequired,
-        if (_followUpRequired && _followUpDate != null)
-          'followUpDate': _followUpDate!.toUtc().toIso8601String(),
-        'followUpNotes': _followUpNotesController.text.trim(),
-      };
+    'chiefComplaint': _csv(_chiefComplaintController.text),
+    'diagnosis': _csv(_diagnosisController.text),
+    'notes': _notesController.text.trim(),
+    'advice': _adviceController.text.trim(),
+    'outcome': _outcome,
+    'followUpRequired': _followUpRequired,
+    if (_followUpRequired && _followUpDate != null)
+      'followUpDate': _followUpDate!.toUtc().toIso8601String(),
+    'followUpNotes': _followUpNotesController.text.trim(),
+  };
 
   Future<void> _saveNotes() async {
     await _run(() async {
@@ -194,24 +193,22 @@ class _ProfessionalConsultationScreenState
   Future<void> _endConsultation() async {
     final diagnosis = _csv(_diagnosisController.text);
     if (diagnosis.isEmpty) {
-      _show('Add at least one diagnosis before ending the consultation.', error: true);
+      _show(
+        'Add at least one diagnosis before ending the consultation.',
+        error: true,
+      );
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('End consultation?'),
-        content: const Text(
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: 'End consultation?',
+      message:
           'This completes the appointment and locks the clinical consultation summary.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('End consultation')),
-        ],
-      ),
+      icon: CupertinoIcons.checkmark_seal,
+      confirmLabel: 'End consultation',
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
 
     await _run(() async {
       final response = await _api.endConsultation(
@@ -304,7 +301,7 @@ class _ProfessionalConsultationScreenState
       appBar: AppBar(
         title: Text(
           'Consultation',
-          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
         ),
         backgroundColor: Colors.white,
         foregroundColor: AppTheme.textPrimary,
@@ -312,7 +309,7 @@ class _ProfessionalConsultationScreenState
         actions: [
           IconButton(
             onPressed: _busy ? null : () => _load(),
-            icon: const Icon(Iconsax.refresh),
+            icon: const Icon(CupertinoIcons.refresh),
           ),
         ],
       ),
@@ -387,7 +384,7 @@ class _ProfessionalConsultationScreenState
               ),
               child: Text(
                 'The patient must complete payment before this video consultation can start.',
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 12,
                   color: AppTheme.warning,
                   fontWeight: FontWeight.w600,
@@ -415,8 +412,9 @@ class _ProfessionalConsultationScreenState
           const SizedBox(height: 12),
           if (isEnded)
             const _InfoBanner(
-              icon: Iconsax.tick_circle,
-              text: 'This consultation is completed. Clinical notes are locked.',
+              icon: CupertinoIcons.checkmark_circle,
+              text:
+                  'This consultation is completed. Clinical notes are locked.',
               color: AppTheme.success,
             )
           else ...[
@@ -425,7 +423,7 @@ class _ProfessionalConsultationScreenState
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: _busy ? null : _start,
-                  icon: const Icon(Iconsax.play, size: 18),
+                  icon: const Icon(CupertinoIcons.play, size: 18),
                   label: const Text('Start consultation'),
                 ),
               ),
@@ -435,23 +433,24 @@ class _ProfessionalConsultationScreenState
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: !_busy && canJoin ? _joinVideo : null,
-                  icon: const Icon(Iconsax.video, size: 18),
-                  label: Text(canJoin ? 'Join secure video room' : 'Video room not ready'),
+                  icon: const Icon(CupertinoIcons.video_camera, size: 18),
+                  label: Text(
+                    canJoin ? 'Join secure video room' : 'Video room not ready',
+                  ),
                 ),
               ),
             ],
             const SizedBox(height: 8),
-            Text(
-              'Status: ${status.replaceAll('_', ' ')}',
-              style: _subStyle(),
-            ),
+            Text('Status: ${status.replaceAll('_', ' ')}', style: _subStyle()),
             if (canEnd) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: _busy ? null : _endConsultation,
-                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.error,
+                  ),
                   icon: const Icon(Icons.stop_circle_outlined, size: 18),
                   label: const Text('End & complete consultation'),
                 ),
@@ -470,38 +469,74 @@ class _ProfessionalConsultationScreenState
         children: [
           Text('Clinical summary', style: _sectionStyle()),
           const SizedBox(height: 12),
-          _field(_chiefComplaintController, 'Chief complaint', 'Comma-separated complaints', enabled: !isEnded),
-          _field(_diagnosisController, 'Diagnosis', 'Comma-separated diagnoses', enabled: !isEnded),
-          _field(_notesController, 'Clinical notes', 'Examination/findings/notes', enabled: !isEnded, maxLines: 4),
-          _field(_adviceController, 'Advice', 'Care advice and precautions', enabled: !isEnded, maxLines: 3),
+          _field(
+            _chiefComplaintController,
+            'Chief complaint',
+            'Comma-separated complaints',
+            enabled: !isEnded,
+          ),
+          _field(
+            _diagnosisController,
+            'Diagnosis',
+            'Comma-separated diagnoses',
+            enabled: !isEnded,
+          ),
+          _field(
+            _notesController,
+            'Clinical notes',
+            'Examination/findings/notes',
+            enabled: !isEnded,
+            maxLines: 4,
+          ),
+          _field(
+            _adviceController,
+            'Advice',
+            'Care advice and precautions',
+            enabled: !isEnded,
+            maxLines: 3,
+          ),
           DropdownButtonFormField<String>(
             value: _outcome,
             decoration: const InputDecoration(labelText: 'Outcome'),
-            items: const [
-              'unknown',
-              'resolved',
-              'improved',
-              'ongoing',
-              'referred',
-              'emergency_referral',
-            ].map((value) => DropdownMenuItem(value: value, child: Text(value.replaceAll('_', ' ')))).toList(),
-            onChanged: isEnded ? null : (value) => setState(() => _outcome = value ?? 'unknown'),
+            items:
+                const [
+                      'unknown',
+                      'resolved',
+                      'improved',
+                      'ongoing',
+                      'referred',
+                      'emergency_referral',
+                    ]
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text(value.replaceAll('_', ' ')),
+                      ),
+                    )
+                    .toList(),
+            onChanged: isEnded
+                ? null
+                : (value) => setState(() => _outcome = value ?? 'unknown'),
           ),
           const SizedBox(height: 10),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             value: _followUpRequired,
-            onChanged: isEnded ? null : (value) => setState(() => _followUpRequired = value),
+            onChanged: isEnded
+                ? null
+                : (value) => setState(() => _followUpRequired = value),
             title: const Text('Follow-up required'),
           ),
           if (_followUpRequired) ...[
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Follow-up date'),
-              subtitle: Text(_followUpDate == null
-                  ? 'Not selected'
-                  : '${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year}'),
-              trailing: const Icon(Iconsax.calendar),
+              subtitle: Text(
+                _followUpDate == null
+                    ? 'Not selected'
+                    : '${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year}',
+              ),
+              trailing: const Icon(CupertinoIcons.calendar),
               onTap: isEnded ? null : _pickFollowUpDate,
             ),
             _field(
@@ -535,7 +570,12 @@ class _ProfessionalConsultationScreenState
         children: [
           Row(
             children: [
-              Expanded(child: Text('Prescription / therapy plan', style: _sectionStyle())),
+              Expanded(
+                child: Text(
+                  'Prescription / therapy plan',
+                  style: _sectionStyle(),
+                ),
+              ),
               if (rx != null) _statusChip(status),
             ],
           ),
@@ -545,14 +585,14 @@ class _ProfessionalConsultationScreenState
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: _busy ? null : _openPrescriptionEditor,
-                icon: const Icon(Iconsax.document_text, size: 18),
+                icon: const Icon(CupertinoIcons.doc_text, size: 18),
                 label: const Text('Create prescription'),
               ),
             )
           else ...[
             Text(
               rx['prescriptionNumber']?.toString() ?? 'Prescription',
-              style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+              style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
             Text(_listText(rx['diagnosis']), style: _subStyle()),
@@ -563,10 +603,11 @@ class _ProfessionalConsultationScreenState
                   child: OutlinedButton.icon(
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => PrescriptionDetailsScreen(prescription: rx),
+                        builder: (_) =>
+                            PrescriptionDetailsScreen(prescription: rx),
                       ),
                     ),
-                    icon: const Icon(Iconsax.eye, size: 16),
+                    icon: const Icon(CupertinoIcons.eye, size: 16),
                     label: const Text('View'),
                   ),
                 ),
@@ -575,7 +616,7 @@ class _ProfessionalConsultationScreenState
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: _busy ? null : _issuePrescription,
-                      icon: const Icon(Iconsax.send_1, size: 16),
+                      icon: const Icon(CupertinoIcons.paperplane, size: 16),
                       label: const Text('Issue'),
                     ),
                   ),
@@ -596,15 +637,15 @@ class _ProfessionalConsultationScreenState
   }
 
   Widget _card({required Widget child}) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: child,
-      );
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: child,
+  );
 
   Widget _field(
     TextEditingController controller,
@@ -613,47 +654,45 @@ class _ProfessionalConsultationScreenState
     bool enabled = true,
     int maxLines = 1,
   }) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: TextField(
-          controller: controller,
-          enabled: enabled,
-          maxLines: maxLines,
-          decoration: InputDecoration(labelText: label, hintText: hint),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: controller,
+      enabled: enabled,
+      maxLines: maxLines,
+      decoration: InputDecoration(labelText: label, hintText: hint),
+    ),
+  );
 
   Widget _statusChip(String status) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppTheme.primary.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          status.replaceAll('_', ' ').toUpperCase(),
-          style: GoogleFonts.plusJakartaSans(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.primary,
-          ),
-        ),
-      );
-
-  TextStyle _titleStyle() => GoogleFonts.plusJakartaSans(
-        fontSize: 15,
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    decoration: BoxDecoration(
+      color: AppTheme.primary.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(
+      status.replaceAll('_', ' ').toUpperCase(),
+      style: GoogleFonts.manrope(
+        fontSize: 10,
         fontWeight: FontWeight.w700,
-        color: AppTheme.textPrimary,
-      );
+        color: AppTheme.primary,
+      ),
+    ),
+  );
 
-  TextStyle _sectionStyle() => GoogleFonts.plusJakartaSans(
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-        color: AppTheme.textPrimary,
-      );
+  TextStyle _titleStyle() => GoogleFonts.manrope(
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    color: AppTheme.textPrimary,
+  );
 
-  TextStyle _subStyle() => GoogleFonts.plusJakartaSans(
-        fontSize: 12,
-        color: AppTheme.textSecondary,
-      );
+  TextStyle _sectionStyle() => GoogleFonts.manrope(
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    color: AppTheme.textPrimary,
+  );
+
+  TextStyle _subStyle() =>
+      GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary);
 
   Future<void> _pickFollowUpDate() async {
     final picked = await showDatePicker(
@@ -666,20 +705,27 @@ class _ProfessionalConsultationScreenState
   }
 
   Widget _errorState() => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Iconsax.warning_2, color: AppTheme.error, size: 42),
-              const SizedBox(height: 12),
-              Text(_error ?? 'Unable to load consultation', textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              ElevatedButton(onPressed: _load, child: const Text('Retry')),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            CupertinoIcons.exclamationmark_triangle,
+            color: AppTheme.error,
+            size: 42,
           ),
-        ),
-      );
+          const SizedBox(height: 12),
+          Text(
+            _error ?? 'Unable to load consultation',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(onPressed: _load, child: const Text('Retry')),
+        ],
+      ),
+    ),
+  );
 
   void _show(String text, {bool error = false}) {
     if (!mounted) return;
@@ -739,7 +785,7 @@ class _InfoBanner extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: color,

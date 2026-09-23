@@ -1,10 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/pharmacy_type.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_service.dart';
-import '../../../core/theme/app_theme.dart';
+import '../theme/pharmacy_colors.dart';
+import '../widgets/pharmacy_ui.dart';
 
 class PharmacyStoreState {
   final Map<String, dynamic> organization;
@@ -44,7 +45,9 @@ class PharmacyStoreState {
     return PharmacyStoreState(
       organization: organization ?? this.organization,
       stores: stores ?? this.stores,
-      selectedStoreId: clearSelectedStore ? null : (selectedStoreId ?? this.selectedStoreId),
+      selectedStoreId: clearSelectedStore
+          ? null
+          : (selectedStoreId ?? this.selectedStoreId),
       organizationRole: organizationRole ?? this.organizationRole,
       loading: loading ?? this.loading,
       error: clearError ? null : (error ?? this.error),
@@ -68,14 +71,20 @@ class PharmacyStoreNotifier extends StateNotifier<PharmacyStoreState> {
       if (saved != null && saved.isNotEmpty) _api.setPharmacyStoreId(saved);
 
       final response = await _api.getPharmacyTenantContext();
-      final data = response.data is Map ? Map<String, dynamic>.from(response.data as Map) : <String, dynamic>{};
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
       final stores = _maps(data['stores']);
       final defaultStoreId = data['defaultStoreId']?.toString();
 
       String? selected = saved;
-      final allowedIds = stores.map((e) => e['_id']?.toString()).whereType<String>().toSet();
+      final allowedIds = stores
+          .map((e) => e['_id']?.toString())
+          .whereType<String>()
+          .toSet();
       if (selected == null || !allowedIds.contains(selected)) {
-        selected = (defaultStoreId != null && allowedIds.contains(defaultStoreId))
+        selected =
+            (defaultStoreId != null && allowedIds.contains(defaultStoreId))
             ? defaultStoreId
             : (stores.isNotEmpty ? stores.first['_id']?.toString() : null);
       }
@@ -106,7 +115,9 @@ class PharmacyStoreNotifier extends StateNotifier<PharmacyStoreState> {
   Future<void> selectStore(String storeId) async {
     if (storeId == state.selectedStoreId) return;
     if (!state.stores.any((e) => e['_id']?.toString() == storeId)) {
-      state = state.copyWith(error: 'The selected branch is no longer available.');
+      state = state.copyWith(
+        error: 'The selected branch is no longer available.',
+      );
       await initialize(force: true);
       return;
     }
@@ -135,15 +146,18 @@ class PharmacyStoreNotifier extends StateNotifier<PharmacyStoreState> {
 
   static String _message(DioException e) {
     final data = e.response?.data;
-    if (data is Map) return data['message']?.toString() ?? data['error']?.toString() ?? 'Unable to load pharmacy branches';
+    if (data is Map)
+      return data['message']?.toString() ??
+          data['error']?.toString() ??
+          'Unable to load pharmacy branches';
     return e.message ?? 'Unable to load pharmacy branches';
   }
 }
 
-final pharmacyStoreProvider = StateNotifierProvider<PharmacyStoreNotifier, PharmacyStoreState>(
-  (ref) => PharmacyStoreNotifier(),
-);
-
+final pharmacyStoreProvider =
+    StateNotifierProvider<PharmacyStoreNotifier, PharmacyStoreState>(
+      (ref) => PharmacyStoreNotifier(),
+    );
 
 class PharmacyStoreSelector extends ConsumerWidget {
   const PharmacyStoreSelector({super.key, this.compact = false});
@@ -153,44 +167,150 @@ class PharmacyStoreSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(pharmacyStoreProvider);
     if (state.loading && state.stores.isEmpty) {
-      return const SizedBox(height: 44, child: Center(child: LinearProgressIndicator()));
+      return const PharmacyShimmer(
+        child: PharmacySkeletonBlock(
+          height: 44,
+          radius: PharmacyColors.radiusCard,
+        ),
+      );
     }
     if (state.stores.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
-        child: Text(state.error ?? 'No pharmacy branch available', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.error)),
+        decoration: BoxDecoration(
+          color: PharmacyColors.card,
+          borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
+          border: Border.all(color: PharmacyColors.border),
+        ),
+        child: Text(
+          state.error ?? 'No pharmacy branch available',
+          style: PharmacyType.sans(fontSize: 12, color: PharmacyColors.error),
+        ),
       );
     }
 
-    final selected = state.selectedStoreId ?? state.stores.first['_id']?.toString();
+    // A single-store pharmacy has nothing to switch between — rendering an
+    // interactive dropdown here just shows one option that does nothing when
+    // tapped. Show a plain read-only chip instead; it becomes a real dropdown
+    // automatically the moment a second branch exists. The store "code" is an
+    // internal identifier (e.g. "MAIN") meant to tell branches apart once
+    // there are several — with only one store it's meaningless clutter, so
+    // it's dropped here and only surfaces as a small badge in the multi-store
+    // dropdown below.
+    if (state.stores.length <= 1) {
+      final store = state.stores.first;
+      final name = store['name']?.toString() ?? 'Pharmacy branch';
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 12,
+          vertical: compact ? 6 : 8,
+        ),
+        decoration: BoxDecoration(
+          color: PharmacyColors.card,
+          borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
+          border: Border.all(color: PharmacyColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.storefront_outlined,
+              size: compact ? 14 : 16,
+              color: PharmacyColors.textSecondary,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                name,
+                overflow: TextOverflow.ellipsis,
+                style: PharmacyType.sans(
+                  fontSize: compact ? 12.5 : 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: PharmacyColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final selected =
+        state.selectedStoreId ?? state.stores.first['_id']?.toString();
     return Container(
       padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: 4),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
+      decoration: BoxDecoration(
+        color: PharmacyColors.card,
+        borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
+        border: Border.all(color: PharmacyColors.border),
+      ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: state.stores.any((s) => s['_id']?.toString() == selected) ? selected : state.stores.first['_id']?.toString(),
+          value: state.stores.any((s) => s['_id']?.toString() == selected)
+              ? selected
+              : state.stores.first['_id']?.toString(),
           isExpanded: true,
           icon: state.loading
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.store_mall_directory_outlined, size: 18),
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(
+                  Icons.store_mall_directory_outlined,
+                  size: 18,
+                  color: PharmacyColors.textSecondary,
+                ),
           items: state.stores.map((store) {
             final id = store['_id']?.toString() ?? '';
             final name = store['name']?.toString() ?? 'Pharmacy branch';
             final code = store['code']?.toString();
             return DropdownMenuItem<String>(
               value: id,
-              child: Text(
-                code == null || code.isEmpty ? name : '$name · $code',
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.plusJakartaSans(fontSize: compact ? 12 : 13, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      overflow: TextOverflow.ellipsis,
+                      style: PharmacyType.sans(
+                        fontSize: compact ? 12 : 13,
+                        fontWeight: FontWeight.w600,
+                        color: PharmacyColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (code != null && code.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: PharmacyColors.greenLight,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        code,
+                        style: PharmacyType.sans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: PharmacyColors.greenDark,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             );
           }).toList(),
           onChanged: state.loading
               ? null
               : (id) {
-                  if (id != null && id.isNotEmpty) ref.read(pharmacyStoreProvider.notifier).selectStore(id);
+                  if (id != null && id.isNotEmpty)
+                    ref.read(pharmacyStoreProvider.notifier).selectStore(id);
                 },
         ),
       ),

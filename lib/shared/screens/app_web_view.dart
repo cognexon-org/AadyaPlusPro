@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -78,7 +78,7 @@ class _AppWebViewState extends State<AppWebView> {
           children: [
             Text(
               widget.title,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textPrimary,
@@ -86,7 +86,7 @@ class _AppWebViewState extends State<AppWebView> {
             ),
             Text(
               widget.url,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 11,
                 color: AppTheme.textSecondary,
               ),
@@ -100,11 +100,11 @@ class _AppWebViewState extends State<AppWebView> {
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Iconsax.refresh, size: 20),
+            icon: const Icon(CupertinoIcons.refresh, size: 20),
             onPressed: () => _controller.reload(),
           ),
           IconButton(
-            icon: const Icon(Iconsax.copy, size: 20),
+            icon: const Icon(CupertinoIcons.doc_on_doc, size: 20),
             onPressed: () {
               // We could add clipboard here too
             },

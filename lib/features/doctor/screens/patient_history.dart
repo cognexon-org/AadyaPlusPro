@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/network/api_service.dart';
 import 'doctor_appointments.dart';
@@ -74,11 +74,11 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        title: Text(widget.patientName, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        title: Text(widget.patientName, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
         bottom: TabBar(
           controller: _tabController,
-          labelStyle: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600),
+          labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
           labelColor: AppTheme.primary, unselectedLabelColor: AppTheme.textTertiary,
           indicatorColor: AppTheme.primary, indicatorWeight: 3,
           tabs: [
@@ -94,7 +94,7 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
               children: [
                 // Appointments tab
                 _appointments.isEmpty
-                    ? _emptyState(Iconsax.calendar, 'No appointment history')
+                    ? _emptyState(CupertinoIcons.calendar, 'No appointment history')
                     : ListView.builder(
                         padding: const EdgeInsets.all(16),
                         itemCount: _appointments.length,
@@ -102,7 +102,7 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
                       ),
                 // Prescriptions tab
                 _prescriptions.isEmpty
-                    ? _emptyState(Iconsax.document_text, 'No prescriptions')
+                    ? _emptyState(CupertinoIcons.doc_text, 'No prescriptions')
                     : ListView.builder(
                         padding: const EdgeInsets.all(16),
                         itemCount: _prescriptions.length,
@@ -117,7 +117,7 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
     return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
       const SizedBox(height: 12),
-      Text(message, style: GoogleFonts.plusJakartaSans(fontSize: 14, color: AppTheme.textSecondary)),
+      Text(message, style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
     ]));
   }
 
@@ -144,33 +144,33 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-          Icon(type == 'video' ? Iconsax.video : type == 'home' ? Iconsax.home : Iconsax.hospital, size: 18, color: AppTheme.primary),
+          Icon(type == 'video' ? CupertinoIcons.video_camera : type == 'home' ? CupertinoIcons.house : Icons.local_hospital_outlined, size: 18, color: AppTheme.primary),
           const SizedBox(width: 8),
-          Text(_formatType(type), style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+          Text(_formatType(type), style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-            child: Text(status, style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w600, color: statusColor)),
+            child: Text(status, style: GoogleFonts.manrope(fontSize: 10, fontWeight: FontWeight.w600, color: statusColor)),
           ),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          const Icon(Iconsax.calendar, size: 14, color: AppTheme.textTertiary),
+          const Icon(CupertinoIcons.calendar, size: 14, color: AppTheme.textTertiary),
           const SizedBox(width: 6),
-          Text(_formatDate(date), style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+          Text(_formatDate(date), style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
           if (time.isNotEmpty) ...[
             const SizedBox(width: 12),
-            const Icon(Iconsax.clock, size: 14, color: AppTheme.textTertiary),
+            const Icon(CupertinoIcons.clock, size: 14, color: AppTheme.textTertiary),
             const SizedBox(width: 6),
-            Text(time, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary)),
+            Text(time, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
           ],
           const Spacer(),
-          Text('₹$fee', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+          Text('₹$fee', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primary)),
         ]),
         if (reason.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text(reason, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textTertiary), maxLines: 2, overflow: TextOverflow.ellipsis),
+          Text(reason, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary), maxLines: 2, overflow: TextOverflow.ellipsis),
         ],
       ]),
     ));
@@ -188,10 +188,10 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Iconsax.document_text, size: 18, color: AppTheme.primary),
+          const Icon(CupertinoIcons.doc_text, size: 18, color: AppTheme.primary),
           const SizedBox(width: 8),
-          Expanded(child: Text(diagnosis.isNotEmpty ? diagnosis : 'Prescription', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary))),
-          Text(_formatDate(date), style: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppTheme.textTertiary)),
+          Expanded(child: Text(diagnosis.isNotEmpty ? diagnosis : 'Prescription', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary))),
+          Text(_formatDate(date), style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
         ]),
         if (meds is List && meds.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -205,14 +205,14 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> with Single
                 Container(width: 4, height: 4, decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2))),
                 const SizedBox(width: 8),
                 Expanded(child: Text('$name${dosage.isNotEmpty ? ' - $dosage' : ''}${freq.isNotEmpty ? ' ($freq)' : ''}',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppTheme.textSecondary))),
+                  style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary))),
               ]),
             );
           }),
         ],
         if (notes.isNotEmpty) ...[
           const SizedBox(height: 8),
-          Text(notes, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontStyle: FontStyle.italic, color: AppTheme.textTertiary), maxLines: 2),
+          Text(notes, style: GoogleFonts.manrope(fontSize: 12, fontStyle: FontStyle.italic, color: AppTheme.textTertiary), maxLines: 2),
         ],
       ]),
     );

@@ -20,7 +20,10 @@ class ApiConstants {
         'Pass --dart-define=AADYA_API_BASE_URL=https://<host>/api',
       );
     }
-    return 'http://13.48.49.45/api';
+    // Local backend for testing — your PC's LAN IP on port 5000. Works from
+    // Android/iOS emulators, physical devices on the same Wi-Fi, and Flutter
+    // web, without needing a different value per target.
+    return 'http://192.168.29.101:5000/api';
   }
 
   static String get socketBaseUrl {
@@ -29,7 +32,8 @@ class ApiConstants {
     final apiUri = Uri.parse(baseUrl);
     var path = apiUri.path;
     if (path.endsWith('/api')) path = path.substring(0, path.length - 4);
-    return apiUri.replace(path: path.isEmpty ? '/' : path)
+    return apiUri
+        .replace(path: path.isEmpty ? '/' : path)
         .toString()
         .replaceFirst(RegExp(r'/$'), '');
   }
@@ -46,6 +50,7 @@ class ApiConstants {
   static const updateProfile = '/auth/profile';
   static const changePassword = '/auth/change-password';
   static const forgotPassword = '/auth/forgot-password';
+  static const resendVerification = '/auth/resend-verification';
   static const logout = '/auth/logout';
 
   // DOCTOR
@@ -55,8 +60,10 @@ class ApiConstants {
   static const doctorEarnings = '/doctor/me/earnings';
   static const doctorEarningsReport = '/doctor/me/earnings/report';
   static const doctorAvailability = '/doctor/me/availability';
-  static String doctorWeeklyAvailability(String doctorId) => '/doctor/$doctorId/availability/weekly';
-  static String doctorDayAvailability(String doctorId) => '/doctor/$doctorId/availability';
+  static String doctorWeeklyAvailability(String doctorId) =>
+      '/doctor/$doctorId/availability/weekly';
+  static String doctorDayAvailability(String doctorId) =>
+      '/doctor/$doctorId/availability';
 
   // PHYSIO
   static const physioProfile = '/physio/me/profile';
@@ -71,10 +78,13 @@ class ApiConstants {
 
   // PHYSIOTHERAPY EXERCISES
   static const physioExerciseCatalog = '/physio-exercises/catalog';
-  static String physioExerciseById(String id) => '/physio-exercises/catalog/$id';
-  static String physioPatientExercisePlans(String patientId) => '/physio-exercises/patients/$patientId/plans';
+  static String physioExerciseById(String id) =>
+      '/physio-exercises/catalog/$id';
+  static String physioPatientExercisePlans(String patientId) =>
+      '/physio-exercises/patients/$patientId/plans';
   static String physioExercisePlan(String id) => '/physio-exercises/plans/$id';
-  static String physioExercisePlanProgress(String id) => '/physio-exercises/plans/$id/progress';
+  static String physioExercisePlanProgress(String id) =>
+      '/physio-exercises/plans/$id/progress';
 
   // PATHOLOGY COMPATIBILITY
   static const pathologyProfile = '/pathology/me/profile';
@@ -83,32 +93,45 @@ class ApiConstants {
   static const pathologyTestSlots = '/pathology/me/test-slots';
   static const pathologyAppointments = '/pathology/me/tests';
   static String pathologyTestById(String id) => '/pathology/me/tests/$id';
-  static String pathologyTestStatus(String id) => '/pathology/me/tests/$id/status';
-  static String pathologyTestReport(String id) => '/pathology/me/tests/$id/report';
+  static String pathologyTestStatus(String id) =>
+      '/pathology/me/tests/$id/status';
+  static String pathologyTestReport(String id) =>
+      '/pathology/me/tests/$id/report';
   static const pathologyMyAppointments = '/pathology/appointments';
 
   // P2 DIAGNOSTICS MERCHANT
   static const diagnosticsMerchantDashboard = '/diagnostics/merchant/dashboard';
   static const diagnosticsMerchantOrders = '/diagnostics/merchant/orders';
-  static String diagnosticsMerchantOrder(String id) => '/diagnostics/merchant/orders/$id';
-  static String diagnosticsAssignCollector(String id) => '/diagnostics/merchant/orders/$id/assign';
-  static String diagnosticsCollectionStatus(String id) => '/diagnostics/merchant/orders/$id/collection-status';
-  static String diagnosticsOrderStatus(String id) => '/diagnostics/merchant/orders/$id/status';
-  static String diagnosticsOfflinePayment(String id) => '/diagnostics/merchant/orders/$id/payment';
-  static String diagnosticsReportUpload(String id) => '/diagnostics/merchant/orders/$id/report';
+  static String diagnosticsMerchantOrder(String id) =>
+      '/diagnostics/merchant/orders/$id';
+  static String diagnosticsAssignCollector(String id) =>
+      '/diagnostics/merchant/orders/$id/assign';
+  static String diagnosticsCollectionStatus(String id) =>
+      '/diagnostics/merchant/orders/$id/collection-status';
+  static String diagnosticsOrderStatus(String id) =>
+      '/diagnostics/merchant/orders/$id/status';
+  static String diagnosticsOfflinePayment(String id) =>
+      '/diagnostics/merchant/orders/$id/payment';
+  static String diagnosticsReportUpload(String id) =>
+      '/diagnostics/merchant/orders/$id/report';
   static const diagnosticsStaff = '/diagnostics/merchant/staff';
-  static String diagnosticsStaffById(String id) => '/diagnostics/merchant/staff/$id';
+  static String diagnosticsStaffById(String id) =>
+      '/diagnostics/merchant/staff/$id';
   static const diagnosticsCatalog = '/diagnostics/merchant/catalog';
   static const diagnosticsCatalogTests = '/diagnostics/merchant/catalog/tests';
-  static String diagnosticsCatalogTest(String id) => '/diagnostics/merchant/catalog/tests/$id';
-  static const diagnosticsCatalogPackages = '/diagnostics/merchant/catalog/packages';
-  static String diagnosticsCatalogPackage(String id) => '/diagnostics/merchant/catalog/packages/$id';
+  static String diagnosticsCatalogTest(String id) =>
+      '/diagnostics/merchant/catalog/tests/$id';
+  static const diagnosticsCatalogPackages =
+      '/diagnostics/merchant/catalog/packages';
+  static String diagnosticsCatalogPackage(String id) =>
+      '/diagnostics/merchant/catalog/packages/$id';
 
   // PHARMACY PROFILE + TENANT
   static const pharmacyProfile = '/pharmacy/profile';
   static const tenantContext = '/tenant/context';
   static const tenantStores = '/tenant/stores';
   static String tenantSelectStore(String id) => '/tenant/stores/$id/select';
+  static String tenantStore(String id) => '/tenant/stores/$id';
 
   // P2 PHARMACY ERP
   static const medicines = '/medicine';
@@ -118,54 +141,90 @@ class ApiConstants {
   static const suppliers = '/supplier';
   static const purchaseOrders = '/purchase-order';
   static String purchaseOrder(String id) => '/purchase-order/$id';
-  static String purchaseOrderApprove(String id) => '/purchase-order/$id/approve';
+  static String purchaseOrderApprove(String id) =>
+      '/purchase-order/$id/approve';
   static String purchaseOrderOrdered(String id) => '/purchase-order/$id/order';
-  static String purchaseOrderReceive(String id) => '/purchase-order/$id/receive';
+  static String purchaseOrderReceive(String id) =>
+      '/purchase-order/$id/receive';
   static String purchaseOrderCancel(String id) => '/purchase-order/$id/cancel';
-  static String purchaseOrderPayment(String id) => '/purchase-order/$id/payment';
+  static String purchaseOrderPayment(String id) =>
+      '/purchase-order/$id/payment';
   static String purchaseOrderGrns(String id) => '/purchase-order/$id/grns';
   static const goodsReceipts = '/grns';
   static const stockTransfers = '/stock-transfers';
-  static String stockTransferAction(String id, String action) => '/stock-transfers/$id/$action';
+  static String stockTransferAction(String id, String action) =>
+      '/stock-transfers/$id/$action';
   static const pharmacyReturns = '/pharmacy-returns';
   static const pharmacyInventoryDashboard = '/pharmacy-erp/dashboard';
   static const pharmacyInventoryValuation = '/pharmacy-erp/valuation';
   static const pharmacyInventoryLedger = '/pharmacy-erp/ledger';
   static const pharmacyProfitLoss = '/pharmacy-erp/profit-loss';
   static const pharmacySales = '/sales';
+  static const counterPayments = '/counter-payments';
+  static String counterPayment(String id) => '/counter-payments/$id';
+  static String counterPaymentClose(String id) => '/counter-payments/$id/close';
   static const pharmacySalesReport = '/sales/report';
+  static const medicineBulkUploadTemplate = '/medicine/bulk-upload/template';
+  static const medicineBulkUpload = '/medicine/bulk-upload';
+  static const medicineCatalogSearch = '/medicine/catalog/search';
 
   // P2 E-PHARMACY MERCHANT
   static const merchantOrders = '/epharmacy/merchant/orders';
+
+  /// The patient's uploaded prescription image, served inline. A pharmacy
+  /// user is authorised for it whenever one of their store's orders
+  /// references the upload, so no extra permission plumbing is needed.
+  static String prescriptionUploadFile(String id) =>
+      '$baseUrl/epharmacy/prescription-uploads/$id/file';
   static String merchantOrder(String id) => '/epharmacy/merchant/orders/$id';
-  static String merchantPrescriptionReview(String id) => '/epharmacy/merchant/orders/$id/prescription';
-  static String merchantConfirmOrder(String id) => '/epharmacy/merchant/orders/$id/confirm';
-  static String merchantOrderStatus(String id) => '/epharmacy/merchant/orders/$id/status';
-  static String merchantCancelOrder(String id) => '/epharmacy/merchant/orders/$id/cancel';
-  static String merchantRefundOrder(String id) => '/epharmacy/merchant/orders/$id/refund';
+  static String merchantOrderReject(String id) =>
+      '/epharmacy/merchant/orders/$id/reject';
+  static const merchantRejectionReasons =
+      '/epharmacy/merchant/rejection-reasons';
+  static const merchantPause = '/epharmacy/merchant/pause';
+  static const merchantSettlement = '/epharmacy/merchant/settlement';
+  static String merchantPrescriptionReview(String id) =>
+      '/epharmacy/merchant/orders/$id/prescription';
+  static String merchantConfirmOrder(String id) =>
+      '/epharmacy/merchant/orders/$id/confirm';
+  static String merchantOrderStatus(String id) =>
+      '/epharmacy/merchant/orders/$id/status';
+  static String merchantCancelOrder(String id) =>
+      '/epharmacy/merchant/orders/$id/cancel';
+  static String merchantRefundOrder(String id) =>
+      '/epharmacy/merchant/orders/$id/refund';
   static const merchantCoupons = '/epharmacy/merchant/coupons';
   static String merchantCoupon(String id) => '/epharmacy/merchant/coupons/$id';
   static const merchantSettings = '/epharmacy/merchant/settings';
 
   // APPOINTMENTS / CONSULTATIONS / PRESCRIPTIONS
   static const appointments = '/appointment';
-  static String appointmentsByPatient(String patientId) => '/appointment/patient/$patientId';
+  static String appointmentsByPatient(String patientId) =>
+      '/appointment/patient/$patientId';
   static const consultations = '/consultations';
-  static String consultationByAppointment(String appointmentId) => '$consultations/appointment/$appointmentId';
-  static String consultationCheckIn(String appointmentId) => '${consultationByAppointment(appointmentId)}/check-in';
-  static String consultationStart(String appointmentId) => '${consultationByAppointment(appointmentId)}/start';
-  static String consultationJoin(String appointmentId) => '${consultationByAppointment(appointmentId)}/join';
-  static String consultationLeave(String appointmentId) => '${consultationByAppointment(appointmentId)}/leave';
-  static String consultationSummary(String appointmentId) => '${consultationByAppointment(appointmentId)}/summary';
-  static String consultationEnd(String appointmentId) => '${consultationByAppointment(appointmentId)}/end';
+  static String consultationByAppointment(String appointmentId) =>
+      '$consultations/appointment/$appointmentId';
+  static String consultationCheckIn(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/check-in';
+  static String consultationStart(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/start';
+  static String consultationJoin(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/join';
+  static String consultationLeave(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/leave';
+  static String consultationSummary(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/summary';
+  static String consultationEnd(String appointmentId) =>
+      '${consultationByAppointment(appointmentId)}/end';
   static const consultationHistory = '$consultations/history';
   static const prescriptions = '/prescription';
-  static String prescriptionsByPatient(String patientId) => '/prescription/patient/$patientId';
-  static String prescriptionByAppointment(String appointmentId) => '/prescription/appointment/$appointmentId';
+  static String prescriptionsByPatient(String patientId) =>
+      '/prescription/patient/$patientId';
+  static String prescriptionByAppointment(String appointmentId) =>
+      '/prescription/appointment/$appointmentId';
   static String prescriptionIssue(String id) => '/prescription/$id/issue';
   static String prescriptionCancel(String id) => '/prescription/$id/cancel';
   static String prescriptionPdf(String id) => '/prescription/$id/pdf';
-
 
   // P3 MR / FIELD FORCE
   static const mrMe = '/mr/me';
@@ -201,7 +260,8 @@ class ApiConstants {
   static const commissionReport = '/commission/report';
   static const chatSession = '/chat/session';
   static const myChatSessions = '/chat/professional/sessions';
-  static String chatHistory(String sessionId) => '/chat/session/$sessionId/messages';
+  static String chatHistory(String sessionId) =>
+      '/chat/session/$sessionId/messages';
   static const labTests = '/labtest';
   static const invoices = '/invoice';
   static const upload = '/upload/profile';

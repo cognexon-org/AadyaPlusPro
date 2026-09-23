@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/gradient_button.dart';
+import '../../../shared/widgets/app_dialog.dart';
+import '../../../shared/widgets/app_form_fields.dart';
 import '../providers/auth_provider.dart';
+import 'phone_otp_screen.dart';
 import '../models/user_model.dart';
+import '../../../core/network/api_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -27,6 +31,88 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _handleForgotPassword() async {
+    final controller = TextEditingController(
+      text: _emailController.text.trim(),
+    );
+    final email = await AppDialog.show<String>(
+      context,
+      title: 'Reset Password',
+      subtitle: "We'll email you a link to set a new password",
+      icon: CupertinoIcons.lock_rotation,
+      content: AppTextField(
+        label: 'Email',
+        controller: controller,
+        icon: CupertinoIcons.mail,
+        hint: 'Enter your account email',
+        margin: EdgeInsets.zero,
+      ),
+      actions: [
+        AppDialog.cancelButton(context),
+        AppDialog.primaryButton(
+          'Send Reset Link',
+          () => Navigator.pop(context, controller.text.trim()),
+        ),
+      ],
+    );
+
+    if (email == null || email.isEmpty || !mounted) return;
+
+    try {
+      await ApiService().forgotPassword(email);
+      if (!mounted) return;
+      _showSnackBar(
+        'If an account exists for $email, a reset link has been sent — check your email.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showSnackBar(
+        'Could not send reset link. Please check your connection and try again.',
+      );
+    }
+  }
+
+  Future<void> _handleResendVerification() async {
+    final controller = TextEditingController(
+      text: _emailController.text.trim(),
+    );
+    final email = await AppDialog.show<String>(
+      context,
+      title: 'Resend Verification Email',
+      subtitle: "We'll send a fresh verification link",
+      icon: CupertinoIcons.mail_solid,
+      content: AppTextField(
+        label: 'Email',
+        controller: controller,
+        icon: CupertinoIcons.mail,
+        hint: 'Enter your account email',
+        margin: EdgeInsets.zero,
+      ),
+      actions: [
+        AppDialog.cancelButton(context),
+        AppDialog.primaryButton(
+          'Resend',
+          () => Navigator.pop(context, controller.text.trim()),
+        ),
+      ],
+    );
+
+    if (email == null || email.isEmpty || !mounted) return;
+
+    try {
+      await ApiService().resendVerification(email);
+      if (!mounted) return;
+      _showSnackBar(
+        'If an unverified account exists for $email, a new verification link has been sent.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showSnackBar(
+        'Could not resend verification email. Please check your connection and try again.',
+      );
+    }
+  }
+
   Future<void> _handleLogin() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -43,9 +129,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (success) {
       final user = ref.read(authProvider).user;
-      // Route to dashboard if verified (check multiple fields for resilience)
-      if (user != null && (user.verificationStatus == VerificationStatus.approved || user.isVerified)) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+      // Admin verification gates public discoverability (patients booking a
+      // doctor, ordering from a pharmacy) on the backend — it never gates a
+      // professional's own ability to manage their practice/store/inventory.
+      // The real precondition for the dashboard is a completed profile.
+      if (user != null && user.profileCompleted) {
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil('/dashboard', (r) => false);
       } else {
         Navigator.of(context).pushNamedAndRemoveUntil('/pending', (r) => false);
       }
@@ -58,7 +149,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: GoogleFonts.plusJakartaSans(fontSize: 13)),
+        content: Text(message, style: GoogleFonts.manrope(fontSize: 13)),
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppTheme.error,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -92,7 +183,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             const SizedBox(height: 24),
             Text(
               'Demo Mode',
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textPrimary,
@@ -101,57 +192,67 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             const SizedBox(height: 8),
             Text(
               'Select a role to preview (no backend needed)',
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.manrope(
                 fontSize: 14,
                 color: AppTheme.textSecondary,
               ),
             ),
             const SizedBox(height: 24),
             _RoleTile(
-              icon: Iconsax.health,
+              icon: Icons.medical_services_outlined,
               title: 'Doctor',
               subtitle: 'Manage appointments & patients',
               color: AppTheme.doctorAccent,
               onTap: () {
                 Navigator.pop(context);
                 ref.read(authProvider.notifier).demoLogin(UserRole.doctor);
-                Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+                Navigator.of(
+                  context,
+                ).pushNamedAndRemoveUntil('/dashboard', (r) => false);
               },
             ),
             const SizedBox(height: 12),
             _RoleTile(
-              icon: Iconsax.activity,
+              icon: CupertinoIcons.waveform_path,
               title: 'Physiotherapist',
               subtitle: 'Manage sessions & exercises',
               color: AppTheme.physioAccent,
               onTap: () {
                 Navigator.pop(context);
-                ref.read(authProvider.notifier).demoLogin(UserRole.physiotherapist);
-                Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+                ref
+                    .read(authProvider.notifier)
+                    .demoLogin(UserRole.physiotherapist);
+                Navigator.of(
+                  context,
+                ).pushNamedAndRemoveUntil('/dashboard', (r) => false);
               },
             ),
             const SizedBox(height: 12),
             _RoleTile(
-              icon: Iconsax.microscope,
+              icon: Icons.biotech_outlined,
               title: 'Pathology Lab',
               subtitle: 'Manage tests & reports',
               color: AppTheme.pathologyAccent,
               onTap: () {
                 Navigator.pop(context);
                 ref.read(authProvider.notifier).demoLogin(UserRole.pathology);
-                Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+                Navigator.of(
+                  context,
+                ).pushNamedAndRemoveUntil('/dashboard', (r) => false);
               },
             ),
             const SizedBox(height: 12),
             _RoleTile(
-              icon: Iconsax.building,
+              icon: Icons.apartment_outlined,
               title: 'Pharmacy',
               subtitle: 'Manage medicines & orders',
               color: AppTheme.pharmacyAccent,
               onTap: () {
                 Navigator.pop(context);
                 ref.read(authProvider.notifier).demoLogin(UserRole.pharmacy);
-                Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+                Navigator.of(
+                  context,
+                ).pushNamedAndRemoveUntil('/dashboard', (r) => false);
               },
             ),
             const SizedBox(height: 16),
@@ -178,37 +279,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        gradient: AppTheme.primaryGradient,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.3),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: const Center(
-                        child: Icon(Iconsax.health, size: 36, color: Colors.white),
-                      ),
+                    Image.asset(
+                      'assets/brand/logo.png',
+                      height: 64,
+                      fit: BoxFit.contain,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
                     Text(
-                      'Aadya Plus Professional',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.textPrimary,
+                      'Professional',
+                      style: GoogleFonts.manrope(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textSecondary,
+                        letterSpacing: 2,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 20),
                     Text(
                       'Sign in to your professional account',
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.manrope(
                         fontSize: 14,
                         color: AppTheme.textSecondary,
                       ),
@@ -225,21 +314,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   decoration: BoxDecoration(
                     color: AppTheme.error.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.error.withValues(alpha: 0.2)),
+                    border: Border.all(
+                      color: AppTheme.error.withValues(alpha: 0.2),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Iconsax.warning_2, size: 18, color: AppTheme.error),
+                      const Icon(
+                        CupertinoIcons.exclamationmark_triangle,
+                        size: 18,
+                        color: AppTheme.error,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           authState.error!,
-                          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppTheme.error),
+                          style: GoogleFonts.manrope(
+                            fontSize: 13,
+                            color: AppTheme.error,
+                          ),
                         ),
                       ),
                       GestureDetector(
-                        onTap: () => ref.read(authProvider.notifier).clearError(),
-                        child: const Icon(Iconsax.close_circle, size: 18, color: AppTheme.error),
+                        onTap: () =>
+                            ref.read(authProvider.notifier).clearError(),
+                        child: const Icon(
+                          CupertinoIcons.xmark_circle,
+                          size: 18,
+                          color: AppTheme.error,
+                        ),
                       ),
                     ],
                   ),
@@ -250,7 +353,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               // Email input
               Text(
                 'Email Address',
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textPrimary,
@@ -265,7 +368,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   hintText: 'Enter your email address',
                   prefixIcon: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: const Icon(Iconsax.sms, size: 20, color: AppTheme.primary),
+                    child: const Icon(
+                      CupertinoIcons.mail,
+                      size: 20,
+                      color: AppTheme.primary,
+                    ),
                   ),
                 ),
               ),
@@ -274,7 +381,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               // Password input
               Text(
                 'Password',
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.manrope(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textPrimary,
@@ -290,41 +397,110 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   hintText: 'Enter your password',
                   prefixIcon: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 14),
-                    child: Icon(Iconsax.lock, size: 20, color: AppTheme.primary),
+                    child: Icon(
+                      CupertinoIcons.lock,
+                      size: 20,
+                      color: AppTheme.primary,
+                    ),
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Iconsax.eye_slash : Iconsax.eye,
+                      _obscurePassword
+                          ? CupertinoIcons.eye_slash
+                          : CupertinoIcons.eye,
                       size: 20,
                       color: AppTheme.textTertiary,
                     ),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {},
-                  child: Text(
-                    'Forgot Password?',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primary,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: _handleResendVerification,
+                    child: Text(
+                      'Resend verification email',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ),
-                ),
+                  TextButton(
+                    onPressed: _handleForgotPassword,
+                    child: Text(
+                      'Forgot Password?',
+                      style: GoogleFonts.manrope(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
 
               // Login button
               GradientButton(
                 text: 'Sign In',
-                icon: Iconsax.login,
+                icon: Icons.login_outlined,
                 isLoading: authState.isLoading,
                 onPressed: _handleLogin,
+              ),
+              const SizedBox(height: 18),
+
+              // OTP sits alongside the password form rather than replacing
+              // it: accounts that share a mobile number are refused OTP
+              // server-side, and those users still need this path.
+              Row(
+                children: [
+                  Expanded(child: Divider(color: AppTheme.divider)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(
+                      'OR',
+                      style: GoogleFonts.manrope(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textTertiary,
+                      ),
+                    ),
+                  ),
+                  Expanded(child: Divider(color: AppTheme.divider)),
+                ],
+              ),
+              const SizedBox(height: 18),
+              OutlinedButton.icon(
+                onPressed: authState.isLoading
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PhoneOtpScreen(),
+                        ),
+                      ),
+                icon: const Icon(Icons.smartphone_outlined, size: 18),
+                label: Text(
+                  'Continue with mobile number',
+                  style: GoogleFonts.manrope(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primary,
+                  side: const BorderSide(color: AppTheme.primary),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  minimumSize: const Size(double.infinity, 50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
               ),
               const SizedBox(height: 24),
 
@@ -336,7 +512,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
                         'DEVELOPMENT',
-                        style: GoogleFonts.plusJakartaSans(
+                        style: GoogleFonts.manrope(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           color: AppTheme.textTertiary,
@@ -349,17 +525,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 20),
                 OutlinedButton.icon(
                   onPressed: _showDemoRoleSelector,
-                  icon: const Icon(Iconsax.monitor, size: 18),
+                  icon: const Icon(Icons.monitor_outlined, size: 18),
                   label: Text(
                     'Try Demo Mode',
-                    style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.textSecondary,
                     side: const BorderSide(color: AppTheme.divider),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     minimumSize: const Size(double.infinity, 48),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -372,7 +553,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   children: [
                     Text(
                       "Don't have an account? ",
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.manrope(
                         fontSize: 14,
                         color: AppTheme.textSecondary,
                       ),
@@ -381,7 +562,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       onTap: () => Navigator.of(context).pushNamed('/register'),
                       child: Text(
                         'Register Now',
-                        style: GoogleFonts.plusJakartaSans(
+                        style: GoogleFonts.manrope(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: AppTheme.primary,
@@ -446,7 +627,7 @@ class _RoleTile extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.manrope(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
@@ -455,7 +636,7 @@ class _RoleTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.manrope(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
                       ),
@@ -463,7 +644,7 @@ class _RoleTile extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Iconsax.arrow_right_3, size: 20, color: color),
+              Icon(CupertinoIcons.chevron_right, size: 20, color: color),
             ],
           ),
         ),

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import '../models/user_model.dart';
 import '../../../core/network/api_service.dart';
 import '../../../core/network/token_storage.dart';
+import '../../../core/notifications/onesignal_service.dart';
 import '../../../core/notifications/professional_push_notification_service.dart';
 
 // Auth state
@@ -52,12 +53,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   bool _isSupportedProfessionalRole(dynamic rawRole) {
     final role = rawRole?.toString().toLowerCase() ?? '';
-    return const {'doctor', 'physio', 'physiotherapist', 'pathology', 'pharmacy', 'mr'}.contains(role);
+    return const {
+      'doctor',
+      'physio',
+      'physiotherapist',
+      'pathology',
+      'pharmacy',
+      'mr',
+    }.contains(role);
   }
 
   String _unsupportedRoleMessage(dynamic rawRole) {
     final role = rawRole?.toString().toLowerCase() ?? '';
-    if (role == 'patient') return 'Patient accounts must use the AadyaPlus patient app.';
+    if (role == 'patient')
+      return 'Patient accounts must use the AadyaPlus patient app.';
     return 'This account role is not supported by AadyaPlus Professional.';
   }
 
@@ -78,11 +87,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   void setUser(UserModel user) {
-    state = AuthState(
-      user: user,
-      isAuthenticated: true,
-      isLoading: false,
-    );
+    state = AuthState(user: user, isAuthenticated: true, isLoading: false);
   }
 
   void setError(String error) {
@@ -103,20 +108,25 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final response = await _api.getCurrentUser();
       final data = response.data;
 
-      if (data != null && (data['success'] == true || data['user'] != null || data['data'] != null)) {
+      if (data != null &&
+          (data['success'] == true ||
+              data['user'] != null ||
+              data['data'] != null)) {
         final userData = _userPayload(data);
-        if (userData.isEmpty || !_isSupportedProfessionalRole(userData['role'])) {
+        if (userData.isEmpty ||
+            !_isSupportedProfessionalRole(userData['role'])) {
           await TokenStorage.clearAll();
           setError(_unsupportedRoleMessage(userData['role']));
           return false;
         }
         final token = await TokenStorage.getToken();
         final user = UserModel.fromJson(userData, token: token);
-        
+
         // Persist user data
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user);
-        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+        await ProfessionalPushNotificationService.instance
+            .syncAuthenticatedDevice();
         return true;
       }
     } on DioException catch (e) {
@@ -139,7 +149,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         }
         final user = UserModel.fromJson(Map<String, dynamic>.from(decoded));
         setUser(user);
-        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+        await ProfessionalPushNotificationService.instance
+            .syncAuthenticatedDevice();
         return true;
       }
     } catch (_) {}
@@ -176,12 +187,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       await TokenStorage.saveToken(token);
       final user = UserModel.fromJson(rawUser, token: token);
-      
+
       // Persist user data
       await TokenStorage.saveUserData(jsonEncode(user.toJson()));
-      
+
       setUser(user.copyWith(token: token));
-      await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+      await ProfessionalPushNotificationService.instance
+          .syncAuthenticatedDevice();
       return true;
     } on DioException catch (e) {
       final message = _extractErrorMessage(e);
@@ -193,6 +205,108 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Requests an OTP for [phone].
+  ///
+  /// Returns the server's `purpose` — 'login' for a number that already has an
+  /// account, 'signup' for one that does not — so the caller can route to
+  /// registration without waiting for the verify step to fail.
+  Future<({bool ok, String purpose, String? error})> sendPhoneOtp(
+    String phone,
+  ) async {
+    try {
+      state = state.copyWith(isLoading: true, error: null);
+      final response = await _api.sendPhoneOtp(phone);
+      state = state.copyWith(isLoading: false);
+      final data = response.data;
+      return (
+        ok: true,
+        purpose: '${data is Map ? data['purpose'] ?? 'login' : 'login'}',
+        error: null,
+      );
+    } on DioException catch (e) {
+      final message = _extractErrorMessage(e);
+      setError(message);
+      return (ok: false, purpose: 'login', error: message);
+    }
+  }
+
+  /// Verifies an OTP.
+  ///
+  /// An existing account is signed in here and [registered] comes back true.
+  /// A new number returns [verificationToken] for the caller to carry into
+  /// registration — no account is created by this call.
+  Future<({bool ok, bool registered, String? verificationToken, String? error})>
+  verifyPhoneOtp(String phone, String code) async {
+    try {
+      state = state.copyWith(isLoading: true, error: null);
+      final response = await _api.verifyPhoneOtp(phone, code);
+      final data = response.data;
+
+      if (data is! Map) {
+        setError('Empty response from server');
+        return (
+          ok: false,
+          registered: false,
+          verificationToken: null,
+          error: 'Empty response from server',
+        );
+      }
+
+      if (data['registered'] != true) {
+        state = state.copyWith(isLoading: false);
+        return (
+          ok: true,
+          registered: false,
+          verificationToken: data['verificationToken']?.toString(),
+          error: null,
+        );
+      }
+
+      final token = data['token'] as String?;
+      if (token == null || token.isEmpty) {
+        setError('Sign-in failed: no token received');
+        return (
+          ok: false,
+          registered: true,
+          verificationToken: null,
+          error: 'no token',
+        );
+      }
+
+      // Same role gate as password login: this app is for professionals, and
+      // a patient account signing in here would land in an empty dashboard.
+      final rawUser = _userPayload(data);
+      if (rawUser.isEmpty || !_isSupportedProfessionalRole(rawUser['role'])) {
+        await TokenStorage.clearAll();
+        final message = _unsupportedRoleMessage(rawUser['role']);
+        setError(message);
+        return (
+          ok: false,
+          registered: true,
+          verificationToken: null,
+          error: message,
+        );
+      }
+
+      await TokenStorage.saveToken(token);
+      final user = UserModel.fromJson(rawUser, token: token);
+      await TokenStorage.saveUserData(jsonEncode(user.toJson()));
+      setUser(user.copyWith(token: token));
+      await ProfessionalPushNotificationService.instance
+          .syncAuthenticatedDevice();
+      return (ok: true, registered: true, verificationToken: null, error: null);
+    } on DioException catch (e) {
+      final message = _extractErrorMessage(e);
+      setError(message);
+      return (
+        ok: false,
+        registered: false,
+        verificationToken: null,
+        error: message,
+      );
+    }
+  }
+
   /// Real registration
   Future<bool> register({
     required String name,
@@ -200,6 +314,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String phone,
     required String password,
     required UserRole role,
+
+    /// Issued by /auth/otp/verify for a number that has no account yet.
+    /// Passing it tells the server the phone is already proven, and it is
+    /// redeemed exactly once.
+    String? verificationToken,
   }) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
@@ -211,6 +330,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         'password': password,
         'role': _roleToApiString(role),
         'registrationSource': 'mobile',
+        if (verificationToken != null && verificationToken.isNotEmpty)
+          'verificationToken': verificationToken,
       });
 
       final data = response.data;
@@ -227,7 +348,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         final user = UserModel.fromLoginResponse(data);
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user.copyWith(token: token));
-        await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+        await ProfessionalPushNotificationService.instance
+            .syncAuthenticatedDevice();
       } else {
         // Registration succeeded but need to login separately
         state = state.copyWith(isLoading: false);
@@ -249,7 +371,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       state = state.copyWith(isLoading: true, error: null);
       await _api.completeProfile(profileData);
-      
+
       // Re-fetch the user to get updated profileCompleted status
       final meResponse = await _api.getCurrentUser();
       final userData = _userPayload(meResponse.data);
@@ -257,7 +379,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final updatedUser = UserModel.fromJson(userData, token: token);
       await TokenStorage.saveUserData(jsonEncode(updatedUser.toJson()));
       setUser(updatedUser);
-      await ProfessionalPushNotificationService.instance.syncAuthenticatedDevice();
+      await ProfessionalPushNotificationService.instance
+          .syncAuthenticatedDevice();
 
       return true;
     } on DioException catch (e) {
@@ -269,9 +392,32 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Re-fetch the current user (e.g. to pick up a verificationStatus change
+  /// after admin approval) without disturbing isLoading/error UI state.
+  /// Returns true if the fetch succeeded, regardless of whether anything
+  /// actually changed.
+  Future<bool> refreshUser() async {
+    try {
+      final response = await _api.getCurrentUser();
+      final userData = _userPayload(response.data);
+      if (userData.isEmpty) return false;
+      final token = state.user?.token ?? await TokenStorage.getToken();
+      final updatedUser = UserModel.fromJson(userData, token: token);
+      await TokenStorage.saveUserData(jsonEncode(updatedUser.toJson()));
+      state = state.copyWith(user: updatedUser, isAuthenticated: true);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Logout and clear all stored data
   Future<void> logout() async {
-    await ProfessionalPushNotificationService.instance.unregisterAuthenticatedDevice();
+    // Unbind first: leaving the OneSignal external id attached would send the
+    // next person to sign in on this device the previous user's order alerts.
+    await OneSignalService.instance.unbindUser();
+    await ProfessionalPushNotificationService.instance
+        .unregisterAuthenticatedDevice();
     try {
       await _api.dio.post('/auth/logout');
     } catch (_) {
@@ -282,7 +428,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   // ==================== DEMO MODE (FALLBACK) ====================
-  
+
   /// Demo login for different roles (when backend is unavailable)
   void demoLogin(UserRole role) {
     final user = UserModel(

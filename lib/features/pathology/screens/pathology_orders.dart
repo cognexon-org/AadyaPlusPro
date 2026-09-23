@@ -33,7 +33,7 @@ class _PathologyOrdersState extends State<PathologyOrders> {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppTheme.surface,
     body: SafeArea(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(padding: const EdgeInsets.fromLTRB(20, 16, 20, 8), child: Text('Diagnostic Orders', style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w800))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 16, 20, 8), child: Text('Diagnostic Orders', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w800))),
       SizedBox(height: 42, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), children: ['all','requested','scheduled','sample_collected','processing','ready_for_review','completed','cancelled'].map((s) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(_label(s)), selected: _status == s, onSelected: (_) { setState(() => _status = s); _load(); }))).toList())),
       if (_loading) const LinearProgressIndicator(),
       Expanded(child: RefreshIndicator(onRefresh: _load, child: _orders.isEmpty ? ListView(children: const [SizedBox(height: 80), Center(child: Text('No diagnostic orders found.'))]) : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _orders.length, itemBuilder: (_, i) => _card(_orders[i])))),
@@ -47,10 +47,10 @@ class _PathologyOrdersState extends State<PathologyOrders> {
     return Card(child: ListTile(
       contentPadding: const EdgeInsets.all(14),
       leading: CircleAvatar(backgroundColor: AppTheme.pathologyAccent.withValues(alpha: .12), child: const Icon(Icons.science_outlined, color: AppTheme.pathologyAccent)),
-      title: Text('${patient['name'] ?? 'Patient'}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+      title: Text('${patient['name'] ?? 'Patient'}', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
       subtitle: Text('${tests.isEmpty ? 'Lab tests' : tests}\n${home ? 'Home collection • ${_label('${o['collectionStatus'] ?? 'unassigned'}')}' : 'Lab visit'} • ${_label('${o['status'] ?? 'requested'}')}'),
       isThreeLine: true,
-      trailing: Text('₹${o['totalAmount'] ?? 0}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+      trailing: Text('₹${o['totalAmount'] ?? 0}', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
       onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => PathologyOrderDetail(orderId: '${o['_id']}'))); await _load(); },
     ));
   }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 
 import '../../../core/network/api_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -117,7 +117,7 @@ class _PhysioExercisePlanEditorState extends State<PhysioExercisePlanEditor> {
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        title: Text('Plan for ${widget.patientName}', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        title: Text('Plan for ${widget.patientName}', style: GoogleFonts.manrope(fontSize: 17, fontWeight: FontWeight.w700)),
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -125,7 +125,7 @@ class _PhysioExercisePlanEditorState extends State<PhysioExercisePlanEditor> {
           child: FilledButton.icon(
             onPressed: _saving ? null : _save,
             style: FilledButton.styleFrom(backgroundColor: AppTheme.physioAccent, padding: const EdgeInsets.symmetric(vertical: 15)),
-            icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Iconsax.tick_circle),
+            icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(CupertinoIcons.checkmark_circle),
             label: Text(_saving ? 'Assigning...' : 'Assign plan (${_selected.length})'),
           ),
         ),
@@ -149,7 +149,7 @@ class _PhysioExercisePlanEditorState extends State<PhysioExercisePlanEditor> {
                       ]),
                     ),
                     const SizedBox(height: 18),
-                    Text('Select exercises', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700)),
+                    Text('Select exercises', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 10),
                     if (_catalog.isEmpty)
                       Container(
@@ -176,7 +176,7 @@ class _PhysioExercisePlanEditorState extends State<PhysioExercisePlanEditor> {
           value: selected,
           onChanged: (v) => _toggle(exercise, v == true),
           activeColor: AppTheme.physioAccent,
-          title: Text(exercise['name'] ?? 'Exercise', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+          title: Text(exercise['name'] ?? 'Exercise', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
           subtitle: Text([exercise['bodyPart'], exercise['category']].where((e) => e != null && e.toString().isNotEmpty).join(' • ')),
         ),
         if (selected && dose != null) ...[
