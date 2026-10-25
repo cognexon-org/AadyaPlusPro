@@ -1,35 +1,46 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../theme/pharmacy_type.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/network/api_service.dart';
 import '../../auth/models/user_model.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../doctor/widgets/home_carousel.dart';
+import '../../notifications/widgets/notification_bell.dart';
+import '../providers/pharmacy_nav_provider.dart';
+import '../providers/pharmacy_orders_provider.dart';
+import '../providers/pharmacy_profile_provider.dart';
 import '../providers/pharmacy_store_provider.dart';
 import '../theme/pharmacy_colors.dart';
+import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
 import 'add_medicine.dart';
-import 'new_sale.dart';
-import 'pharmacy_coupons.dart';
-import 'pharmacy_inventory_ops.dart';
 import 'pharmacy_online_settings.dart';
-import 'pharmacy_orders.dart';
 import 'pharmacy_procurement.dart';
-import 'prescription_queue.dart';
 import 'pharmacy_sales.dart';
+import 'pharmacy_coupons.dart';
+import 'prescription_queue.dart';
 import 'sale_details_screen.dart';
 import 'stock_alert.dart';
 
-/// Pharmacy Home.
+// New sale (walk-in POS), Transfers and Coupons are deliberately off Home —
+// their screens still exist: new_sale.dart, pharmacy_inventory_ops.dart and
+// pharmacy_coupons.dart. Restore by importing them and adding an action.
+
+/// Pharmacy Home, in the module's minimal style.
 ///
-/// One dominant block, then dense content — deliberately not a page of
-/// equal-weight cards floating on grey. The day's takings own the screen at
-/// 38pt; everything below is grouped by hairline rules on white, at the
-/// density a counter operator actually reads. Colour is reserved for meaning
-/// (money is green, alerts are amber/rose); nothing is tinted for decoration.
+/// White page; content in soft grey grouped panels with no shadow or border;
+/// hierarchy from type size and weight rather than boxes. Green is reserved
+/// for money and the primary action; amber/red appear only as small text,
+/// never as fills. One large number on the screen (today's sales) and one
+/// live signal (orders waiting) — everything else is quiet rows.
 class PharmacyHome extends ConsumerStatefulWidget {
   const PharmacyHome({super.key});
 
@@ -49,12 +60,19 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
   String? _error;
   String? _loadedStoreId;
 
+  /// True once the list has scrolled under the pinned header, which then
+  /// shows a hairline so its edge reads.
+  bool _scrolled = false;
+
   @override
   void initState() {
     super.initState();
     Future.microtask(() async {
       await ref.read(pharmacyStoreProvider.notifier).initialize();
-      if (mounted) await _load();
+      if (!mounted) return;
+      // The header's "accepting orders" line reads the online-store settings.
+      ref.read(pharmacyProfileProvider.notifier).initialize();
+      await _load();
     });
   }
 
@@ -94,19 +112,38 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
         _loadedStoreId = storeId;
         _loading = false;
       });
-    } on DioException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
+        // Recorded on failure too: build() reloads whenever this differs from
+        // the selected branch, so leaving it unset turned one failed request
+        // into an endless retry loop.
+        _loadedStoreId = storeId;
         _loading = false;
-        _error = _message(e);
+        _error = e is DioException
+            ? _message(e)
+            : pharmacyErrorMessage(e, fallback: "Couldn't load this branch.");
       });
     }
   }
 
-  Future<void> _open(Widget page) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-    if (mounted) await _load();
+  Future<void> _refresh() async {
+    ref.read(pharmacyOrdersProvider.notifier).loadOrders(silent: true);
+    await _load();
   }
+
+  Future<void> _open(Widget page) async {
+    await Navigator.of(context).push(PharmacyPageRoute(builder: (_) => page));
+    if (!mounted) return;
+    // Coming back from Online store may have paused or reopened the store.
+    ref
+        .read(pharmacyProfileProvider.notifier)
+        .loadOnlineSettings(silent: true, force: true);
+    await _load();
+  }
+
+  void _goToTab(int tab) =>
+      ref.read(pharmacyTabRequestProvider.notifier).state = tab;
 
   // ───────────────────────────── Build ─────────────────────────────
 
@@ -118,586 +155,89 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
         !_loading) {
       Future.microtask(_load);
     }
-
-    return Scaffold(
-      // Tints the status-bar strip so the hero reads as running to the top.
-      backgroundColor: PharmacyColors.heroGradient.first,
-      body: SafeArea(
-        bottom: false,
-        child: Container(
-          color: PharmacyColors.bg,
-          child: RefreshIndicator(
-            color: PharmacyColors.green,
-            onRefresh: _load,
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _hero(store),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                    child: PharmacyErrorBanner(
-                      message: _error!,
-                      onRetry: _load,
-                    ),
-                  ),
-                _alertsGroup(),
-                _verificationNotice(),
-                const SizedBox(height: 20),
-                _label('ACTIONS'),
-                _actionsGroup(),
-                const SizedBox(height: 20),
-                _banner(),
-                _inventoryGroup(),
-                _billsGroup(),
-                const SizedBox(height: 24),
-              ],
-            ),
-          ),
-        ),
-      ),
+    final awaiting = ref.watch(
+      pharmacyOrdersProvider.select((s) => s.awaitingOrders),
     );
-  }
 
-  // ────────────────────────────── Hero ─────────────────────────────
-
-  Widget _hero(PharmacyStoreState store) {
-    final revenue =
-        num.tryParse('${_stats['todayRevenue'] ?? 0}')?.toDouble() ?? 0;
-    final bills = _int(_stats['todayTransactions']);
-    final profit =
-        num.tryParse('${_stats['todayGrossProfit'] ?? 0}')?.toDouble() ?? 0;
-
-    final parts = <String>[
-      if (bills > 0) '$bills ${bills == 1 ? 'bill' : 'bills'}',
-      if (profit != 0) '${_rupees(profit)} profit',
-      if (bills > 0) '${_rupees(revenue / bills)} avg',
-    ];
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: PharmacyColors.heroGradient,
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _storeRow(store),
-          const SizedBox(height: 18),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'TODAY',
-                      style: PharmacyType.sans(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.6,
-                        color: Colors.white.withValues(alpha: 0.55),
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    if (_loading)
-                      // The hero sits on green, so this placeholder is a white
-                      // wash rather than the slate PharmacySkeletonBlock — but
-                      // it takes the same shimmer as every other skeleton.
-                      PharmacyShimmer(
-                        child: Container(
-                          width: 150,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                      )
-                    else
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          _rupees(revenue),
-                          maxLines: 1,
-                          style: PharmacyType.number(
-                            fontSize: 38,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -1.4,
-                            height: 1,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Text(
-                  DateFormat('EEE, d MMM').format(DateTime.now()),
-                  style: PharmacyType.sans(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white.withValues(alpha: 0.6),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (!_loading) ...[
-            const SizedBox(height: 7),
-            Text(
-              parts.isEmpty ? 'No bills yet today' : parts.join('  ·  '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: PharmacyType.sans(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.78),
-              ),
-            ),
-          ],
-          if (!_loading && _dailyReport.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Container(height: 1, color: Colors.white.withValues(alpha: 0.14)),
-            const SizedBox(height: 12),
-            _trendStrip(),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// The location shown in the hero is the one captured when the pharmacy was
-  /// registered — `PharmacyProfile.address` — not the store record's copy.
-  /// The backend seeds a store's address from the profile when it provisions
-  /// the tenant and re-syncs it on every profile save, but a store created
-  /// before the profile carried an address keeps whatever it was given, so the
-  /// registration record is the one to trust.
-  ///
-  /// The selected store's address is only a fallback, and it is the right
-  /// answer for an additional branch: a second branch has its own address,
-  /// entered for that branch, which the registration record knows nothing
-  /// about.
-  String _registeredLocation(PharmacyStoreState store) {
-    String from(Map<String, dynamic> address) => [
-      address['city'],
-      address['state'],
-    ].where((v) => v != null && '$v'.trim().isNotEmpty).join(', ');
-
-    final registered = from(_map(_profile['address']));
-    if (registered.isNotEmpty) return registered;
-    return from(_map(store.selectedStore?['address']));
-  }
-
-  Widget _storeRow(PharmacyStoreState store) {
-    final storeName = store.selectedStore?['name']?.toString() ?? 'Pharmacy';
-    final city = _registeredLocation(store);
-    final multiBranch = store.stores.length > 1;
-    final user = ref.watch(authProvider).user;
-    final owner = (user?.name ?? '').trim();
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        backgroundColor: PharmacyColors.bg,
+        body: SafeArea(
+          bottom: false,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              InkWell(
-                onTap: multiBranch ? () => _switchBranch(store) : null,
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        storeName.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: PharmacyType.sans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.9,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    if (multiBranch) ...[
-                      const SizedBox(width: 3),
-                      Icon(
-                        LucideIcons.chevronDown,
-                        size: 14,
-                        color: Colors.white.withValues(alpha: 0.85),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                [
-                  if (city.isNotEmpty) city,
-                  if (owner.isNotEmpty) owner,
-                ].join('  ·  '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: PharmacyType.sans(
-                  fontSize: 11,
-                  color: Colors.white.withValues(alpha: 0.6),
-                ),
-              ),
-              if (store.error != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  store.error!,
-                  style: PharmacyType.sans(fontSize: 11, color: Colors.white),
-                ),
-              ],
-            ],
-          ),
-        ),
-        // The dashboard shell floats a 46px notification bell at
-        // (top: 12, right: 12) over every tab screen; without this reserved
-        // gap the branch name runs underneath it.
-        const SizedBox(width: 52),
-      ],
-    );
-  }
-
-  /// Seven days of takings as bars inside the hero — the trend belongs next
-  /// to the number it explains, not in a chart card of its own.
-  Widget _trendStrip() {
-    const weekday = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    final recent = _dailyReport.length > 7
-        ? _dailyReport.sublist(_dailyReport.length - 7)
-        : _dailyReport;
-    final values = recent
-        .map((e) => num.tryParse('${e['netSales']}')?.toDouble() ?? 0)
-        .toList();
-    final labels = recent.map((e) {
-      final d = DateTime.tryParse('${e['_id']}');
-      return d == null ? '' : weekday[d.weekday - 1];
-    }).toList();
-    final maxValue = values.fold<double>(0, (a, b) => b > a ? b : a);
-    final total = values.fold<double>(0, (a, b) => a + b);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        for (var i = 0; i < values.length; i++) ...[
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 7,
-                height: maxValue <= 0
-                    ? 4
-                    : (4 + (values[i] / maxValue) * 30).clamp(4.0, 34.0),
+              // Pinned: the store, its live status and the bell stay put while
+              // the content scrolls beneath — the bell used to float over a
+              // scrolling page and looked detached from it.
+              AnimatedContainer(
+                duration: PharmacyMotion.fast,
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(
-                    alpha: maxValue <= 0
-                        ? 0.3
-                        : (0.3 + (values[i] / maxValue) * 0.7),
-                  ),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                labels[i],
-                style: PharmacyType.sans(
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.45),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 7),
-        ],
-        const Spacer(),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 2),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                'LAST ${values.length} DAYS',
-                style: PharmacyType.sans(
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.1,
-                  color: Colors.white.withValues(alpha: 0.5),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _rupees(total),
-                style: PharmacyType.number(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _switchBranch(PharmacyStoreState storeState) {
-    if (storeState.stores.length <= 1) return;
-    showPharmacySheet<void>(
-      context,
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Switch branch',
-            style: PharmacyType.sans(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: PharmacyColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 14),
-          ...storeState.stores.map((s) {
-            final id = s['_id']?.toString() ?? '';
-            final selected = id == storeState.selectedStoreId;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Material(
-                color: selected
-                    ? PharmacyColors.greenVeryLight
-                    : PharmacyColors.bgSecondary,
-                borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(
-                    PharmacyColors.radiusInput,
-                  ),
-                  onTap: () {
-                    ref.read(pharmacyStoreProvider.notifier).selectStore(id);
-                    Navigator.pop(ctx);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 13,
-                      vertical: 12,
+                  color: PharmacyColors.bg,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: _scrolled
+                          ? PharmacyColors.border
+                          : PharmacyColors.bg,
                     ),
-                    child: Row(
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: _header(store)),
+                    const SizedBox(width: 12),
+                    const NotificationBell(color: PharmacyColors.green),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (n) {
+                    if (n.depth != 0) return false;
+                    final scrolled = n.metrics.pixels > 2;
+                    if (scrolled != _scrolled) {
+                      setState(() => _scrolled = scrolled);
+                    }
+                    return false;
+                  },
+                  child: RefreshIndicator(
+                    color: PharmacyColors.green,
+                    onRefresh: _refresh,
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                      physics: const AlwaysScrollableScrollPhysics(),
                       children: [
-                        Icon(
-                          LucideIcons.store,
-                          size: 17,
-                          color: selected
-                              ? PharmacyColors.green
-                              : PharmacyColors.textSecondary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            s['name']?.toString() ?? 'Pharmacy branch',
-                            style: PharmacyType.sans(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                              color: PharmacyColors.textPrimary,
-                            ),
+                        _Section(index: 1, child: _today()),
+                        const SizedBox(height: 16),
+                        _Section(index: 2, child: _banner()),
+                        const SizedBox(height: 16),
+                        _Section(
+                          index: 3,
+                          child: _LiveOrdersRow(
+                            awaiting: awaiting,
+                            onOpen: () => _goToTab(PharmacyTab.orders),
                           ),
                         ),
-                        if (selected)
-                          const Icon(
-                            LucideIcons.check,
-                            size: 16,
-                            color: PharmacyColors.green,
-                          ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 16),
+                          PharmacyErrorBanner(message: _error!, onRetry: _load),
+                        ],
+                        ..._verificationNotice(),
+                        const SizedBox(height: 28),
+                        _Section(index: 4, child: _actions(awaiting)),
+                        const SizedBox(height: 28),
+                        _Section(index: 5, child: _inventory()),
+                        const SizedBox(height: 28),
+                        _Section(index: 6, child: _attention()),
+                        const SizedBox(height: 28),
+                        _Section(index: 7, child: _bills()),
                       ],
                     ),
                   ),
                 ),
               ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  // ───────────────────────── Section chrome ────────────────────────
-
-  Widget _label(String text, {String? action, VoidCallback? onAction}) =>
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 9),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                style: PharmacyType.sans(
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
-                  color: PharmacyColors.textTertiary,
-                ),
-              ),
-            ),
-            if (action != null)
-              InkWell(
-                onTap: onAction,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 2,
-                  ),
-                  child: Text(
-                    action,
-                    style: PharmacyType.sans(
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.1,
-                      color: PharmacyColors.green,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      );
-
-  /// A bordered group with hairline-separated rows. Every list on this screen
-  /// uses it, so the page has one grouping idiom instead of five card styles.
-  Widget _group(List<Widget> children) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
-
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
-
-  // ───────────────────────────── Alerts ────────────────────────────
-
-  Widget _alertsGroup() {
-    if (_loading || _error != null) return const SizedBox.shrink();
-    final rows = <Widget>[];
-
-    void add(
-      IconData icon,
-      Color tone,
-      int count,
-      String one,
-      String many,
-      VoidCallback onTap,
-    ) {
-      if (count <= 0) return;
-      if (rows.isNotEmpty) rows.add(_hairline);
-      rows.add(_alertRow(icon, tone, count, count == 1 ? one : many, onTap));
-    }
-
-    add(
-      LucideIcons.packageSearch,
-      PharmacyColors.warning,
-      _int(_stats['lowStock']),
-      'medicine is low on stock',
-      'medicines are low on stock',
-      () => _open(const StockAlertScreen(initialTab: 0)),
-    );
-    add(
-      LucideIcons.calendarClock,
-      PharmacyColors.info,
-      _int(_stats['expiringBatches']),
-      'batch expires soon',
-      'batches expire soon',
-      () => _open(const StockAlertScreen(initialTab: 1)),
-    );
-    add(
-      LucideIcons.circleAlert,
-      PharmacyColors.error,
-      _int(_stats['expiredBatches']),
-      'batch has expired',
-      'batches have expired',
-      () => _open(const StockAlertScreen(initialTab: 2)),
-    );
-    add(
-      LucideIcons.truck,
-      PharmacyColors.textSecondary,
-      _int(_stats['pendingOrders']),
-      'purchase order is open',
-      'purchase orders are open',
-      () => _open(const PharmacyProcurement()),
-    );
-
-    if (rows.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 18),
-      child: _group(rows),
-    );
-  }
-
-  Widget _alertRow(
-    IconData icon,
-    Color tone,
-    int count,
-    String label,
-    VoidCallback onTap,
-  ) {
-    return Material(
-      color: PharmacyColors.bg,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(13, 11, 11, 11),
-          child: Row(
-            children: [
-              Icon(icon, size: 16, color: tone),
-              const SizedBox(width: 11),
-              Expanded(
-                child: RichText(
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '$count ',
-                        style: PharmacyType.sans(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w800,
-                          color: PharmacyColors.textStrong,
-                        ),
-                      ),
-                      TextSpan(
-                        text: label,
-                        style: PharmacyType.sans(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w500,
-                          color: PharmacyColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Icon(
-                LucideIcons.chevronRight,
-                size: 15,
-                color: PharmacyColors.textDisabled,
-              ),
             ],
           ),
         ),
@@ -705,135 +245,816 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
     );
   }
 
-  // ────────────────────── Verification ──────────────────────
+  // ───────────────────────────── Header ────────────────────────────
 
-  /// The "verification pending" notice, shown here rather than as a strip
-  /// above the hero. It sits directly above the actions it qualifies, because
-  /// the point of the message is which actions still work while you wait.
-  ///
-  /// Only an explicitly non-approved status renders it. A null status means
-  /// the user record has not loaded yet, and warning someone about a state you
-  /// have not actually read is worse than staying quiet for a moment.
-  Widget _verificationNotice() {
-    final status = ref.watch(authProvider).user?.verificationStatus;
-    if (_verificationDismissed ||
-        status == null ||
-        status == VerificationStatus.approved) {
-      return const SizedBox.shrink();
-    }
+  /// The location captured at registration (`PharmacyProfile.address`), with
+  /// the selected store's address as the fallback for additional branches.
+  String _location(PharmacyStoreState store) {
+    String from(Map<String, dynamic> a) => [
+      a['city'],
+      a['state'],
+    ].where((v) => v != null && '$v'.trim().isNotEmpty).join(', ');
+    final registered = from(_map(_profile['address']));
+    return registered.isNotEmpty
+        ? registered
+        : from(_map(store.selectedStore?['address']));
+  }
 
-    final rejected = status == VerificationStatus.rejected;
-    final suspended = status == VerificationStatus.suspended;
-    final bad = rejected || suspended;
-    final tone = bad ? PharmacyColors.error : PharmacyColors.warning;
-    final surface = bad
-        ? PharmacyColors.errorBg
-        : PharmacyTileStyle.amber.surface;
-    final edge = bad ? PharmacyColors.errorBg : PharmacyTileStyle.amber.border;
+  /// Store name, then the one thing a pharmacist wants to know on opening
+  /// the app: is the store taking online orders right now. Tapping the status
+  /// opens Online store, where it is changed.
+  Widget _header(PharmacyStoreState store) {
+    final name = store.selectedStore?['name']?.toString() ?? 'Pharmacy';
+    final multiBranch = store.stores.length > 1;
+    final city = _location(store).split(',').first.trim();
+    final settings = ref.watch(
+      pharmacyProfileProvider.select((s) => s.onlineSettings),
+    );
 
-    final title = rejected
-        ? 'Verification rejected'
-        : suspended
-        ? 'Store suspended'
-        : 'Verification pending';
-    final body = rejected
-        ? 'Your documents were not accepted. Re-submit them from your profile — inventory and billing keep working in the meantime.'
-        : suspended
-        ? 'Your store is hidden from online orders. Contact support to restore it; counter billing and stock still work.'
-        : "Your store isn't listed for online orders yet. Everything below still works — add medicines, take counter sales and manage stock while you wait.";
+    final enabled = settings['enabled'] != false;
+    final pausedUntil = DateTime.tryParse(
+      '${settings['pausedUntil'] ?? ''}',
+    )?.toLocal();
+    final paused = pausedUntil != null && pausedUntil.isAfter(DateTime.now());
+    final (statusText, tone) = settings.isEmpty
+        ? (null, PharmacyColors.textTertiary)
+        : !enabled
+        ? ('Online store is off', PharmacyColors.textTertiary)
+        : paused
+        ? (
+            'Paused until ${DateFormat('h:mm a').format(pausedUntil)}',
+            PharmacyColors.warning,
+          )
+        : ('Accepting online orders', PharmacyColors.green);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(13, 11, 9, 12),
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: edge),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PharmacyPressable(
+            onTap: multiBranch ? () => _switchBranch(store) : null,
+            haptic: multiBranch,
+            scale: 0.99,
+            child: Row(
               children: [
-                Icon(
-                  bad ? LucideIcons.circleAlert : LucideIcons.hourglass,
-                  size: 15,
-                  color: tone,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
+                Flexible(
                   child: Text(
-                    title,
-                    style: PharmacyType.sans(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: PharmacyColors.textStrong,
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _Type.title.copyWith(
+                      fontSize: PharmacyType.figure,
+                      letterSpacing: -0.4,
                     ),
                   ),
                 ),
-                InkWell(
-                  onTap: () => setState(() => _verificationDismissed = true),
-                  borderRadius: BorderRadius.circular(4),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(
-                      LucideIcons.x,
-                      size: 14,
-                      color: PharmacyColors.textSecondary,
+                if (multiBranch) ...[
+                  const SizedBox(width: 3),
+                  const Icon(
+                    LucideIcons.chevronDown,
+                    size: 18,
+                    color: PharmacyColors.textSecondary,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (store.error != null)
+            Text(
+              store.error!,
+              style: _Type.caption.copyWith(color: PharmacyColors.error),
+            )
+          else
+            PharmacyPressable(
+              onTap: statusText == null
+                  ? null
+                  : () => _open(const PharmacyOnlineSettings()),
+              scale: 0.98,
+              child: Row(
+                children: [
+                  if (statusText != null) ...[
+                    // Live only while orders can actually arrive.
+                    !enabled || paused
+                        ? Container(
+                            width: 7,
+                            height: 7,
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            decoration: BoxDecoration(
+                              color: tone,
+                              shape: BoxShape.circle,
+                            ),
+                          )
+                        : const PharmacyPulse(size: 7),
+                    const SizedBox(width: 2),
+                    Flexible(
+                      child: Text(
+                        statusText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _Type.caption.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: tone == PharmacyColors.green
+                              ? PharmacyColors.greenDark
+                              : tone,
+                        ),
+                      ),
+                    ),
+                  ],
+                  Text(
+                    [
+                      if (statusText != null) '',
+                      if (city.isNotEmpty) city,
+                      DateFormat('EEE, d MMM').format(DateTime.now()),
+                    ].join('  ·  '),
+                    style: _Type.caption,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────────── Today ─────────────────────────────
+
+  /// The focal card: today's takings, how they compare with yesterday, and
+  /// the week as a soft area chart along the card's lower edge.
+  Widget _today() {
+    final revenue = _num(_stats['todayRevenue']);
+    final bills = _int(_stats['todayTransactions']);
+    final profit = _num(_stats['todayGrossProfit']);
+    final week = _week;
+    final values = [for (final d in week) d.value];
+    final weekTotal = values.fold<double>(0, (a, b) => a + b);
+    final yesterday = values.length > 1 ? values[values.length - 2] : 0.0;
+    final today = values.isEmpty ? revenue : math.max(values.last, revenue);
+    final delta = yesterday > 0 ? (today - yesterday) / yesterday * 100 : null;
+    final pending = _loading && _stats.isEmpty;
+
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [PharmacyColors.greenVeryLight, PharmacyColors.panel],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      "Today's sales",
+                      style: _Type.caption.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: PharmacyColors.textHeading,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (!pending && delta != null) _deltaChip(delta),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                pending
+                    ? const PharmacyShimmer(
+                        child: PharmacySkeletonBlock(width: 150, height: 30),
+                      )
+                    : FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: PharmacyCountUp(
+                          value: revenue,
+                          format: _rupees,
+                          style: _Type.display,
+                        ),
+                      ),
+                const SizedBox(height: 4),
+                Text(
+                  pending
+                      ? ' '
+                      : bills == 0
+                      ? 'No bills yet today'
+                      : [
+                          '$bills ${bills == 1 ? 'bill' : 'bills'}',
+                          '${_rupees(profit)} profit',
+                          '${_rupees(revenue / bills)} avg',
+                        ].join('  ·  '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _Type.caption,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(height: 64, child: _sparkline(values)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+            child: Row(
+              children: [
+                for (var i = 0; i < week.length; i++)
+                  Expanded(
+                    child: Text(
+                      DateFormat('E').format(week[i].day)[0],
+                      textAlign: TextAlign.center,
+                      style: _Type.caption.copyWith(
+                        fontSize: PharmacyType.micro,
+                        fontWeight: i == week.length - 1
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: i == week.length - 1
+                            ? PharmacyColors.greenDark
+                            : PharmacyColors.textTertiary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: Colors.white),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+            child: Row(
+              children: [
+                Text('This week', style: _Type.caption),
+                const Spacer(),
+                Text(
+                  _rupees(weekTotal),
+                  style: PharmacyType.number(
+                    fontSize: PharmacyType.body,
+                    fontWeight: FontWeight.w700,
+                    color: PharmacyColors.textStrong,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _deltaChip(double delta) {
+    final up = delta >= 0;
+    final tone = up ? PharmacyColors.greenDark : PharmacyColors.error;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            up ? LucideIcons.trendingUp : LucideIcons.trendingDown,
+            size: 13,
+            color: tone,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '${up ? '+' : ''}${delta.toStringAsFixed(0)}% vs yesterday',
+            style: PharmacyType.sans(
+              fontSize: PharmacyType.micro,
+              fontWeight: FontWeight.w700,
+              color: tone,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Seven days as a smooth filled line, edge to edge, no axes — context for
+  /// the number above it, not a chart to be read value by value.
+  Widget _sparkline(List<double> values) {
+    final maxV = values.fold<double>(0, math.max);
+    if (maxV <= 0) {
+      return Center(child: Text('No sales this week', style: _Type.caption));
+    }
+    // Inset so the line's ends line up with the weekday letters below.
+    return LayoutBuilder(
+      builder: (context, c) {
+        final step = (c.maxWidth - 36) / 7;
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: 18 + step / 2),
+          child: LineChart(
+            LineChartData(
+              minX: 0,
+              maxX: values.length - 1.0,
+              minY: 0,
+              maxY: maxV * 1.15,
+              gridData: const FlGridData(show: false),
+              borderData: FlBorderData(show: false),
+              titlesData: const FlTitlesData(show: false),
+              lineTouchData: const LineTouchData(enabled: false),
+              clipData: const FlClipData.none(),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: [
+                    for (var i = 0; i < values.length; i++)
+                      FlSpot(i.toDouble(), values[i]),
+                  ],
+                  isCurved: true,
+                  curveSmoothness: 0.35,
+                  preventCurveOverShooting: true,
+                  color: PharmacyColors.green,
+                  barWidth: 2.5,
+                  isStrokeCapRound: true,
+                  dotData: FlDotData(
+                    show: true,
+                    checkToShowDot: (spot, _) => spot.x == values.length - 1,
+                    getDotPainter: (_, _, _, _) => FlDotCirclePainter(
+                      radius: 4,
+                      color: PharmacyColors.green,
+                      strokeWidth: 2.5,
+                      strokeColor: Colors.white,
+                    ),
+                  ),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        PharmacyColors.green.withValues(alpha: 0.22),
+                        PharmacyColors.green.withValues(alpha: 0),
+                      ],
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.only(left: 23, right: 6),
-              child: Text(
-                body,
-                style: PharmacyType.sans(
-                  fontSize: 11.5,
-                  height: 1.45,
-                  color: PharmacyColors.textSecondary,
+            duration: PharmacyMotion.slow,
+            curve: PharmacyMotion.enter,
+          ),
+        );
+      },
+    );
+  }
+
+  /// Seven calendar days ending today, zero-filled — the report lists only
+  /// days that had sales.
+  List<({DateTime day, double value})> get _week {
+    final byDay = <String, double>{};
+    for (final e in _dailyReport) {
+      final d = DateTime.tryParse('${e['_id']}');
+      if (d != null) {
+        byDay[DateFormat('yyyy-MM-dd').format(d)] = _num(e['netSales']);
+      }
+    }
+    final t = DateTime.now();
+    return [
+      for (var i = 6; i >= 0; i--)
+        () {
+          final day = DateTime(t.year, t.month, t.day - i);
+          return (
+            day: day,
+            value: byDay[DateFormat('yyyy-MM-dd').format(day)] ?? 0.0,
+          );
+        }(),
+    ];
+  }
+
+  // ──────────────────────────── Actions ────────────────────────────
+
+  /// Five small icon buttons in one row. Neutral icons on a light disc — the
+  /// labels carry the meaning, so the buttons do not each need a colour.
+  Widget _actions(List<Map<String, dynamic>> awaiting) {
+    final rx = awaiting
+        .where((o) => '${o['orderStatus']}' == 'prescription_review')
+        .length;
+    final items = [
+      (
+        'Rx queue',
+        LucideIcons.fileText,
+        () => _open(const PrescriptionQueue()),
+        rx,
+      ),
+      (
+        'Add stock',
+        LucideIcons.packagePlus,
+        () => _open(const AddMedicine()),
+        0,
+      ),
+      (
+        'Alerts',
+        LucideIcons.triangleAlert,
+        () => _open(const StockAlertScreen()),
+        0,
+      ),
+      (
+        'Purchase',
+        LucideIcons.truck,
+        () => _open(const PharmacyProcurement()),
+        0,
+      ),
+      (
+        'Store',
+        LucideIcons.store,
+        () => _open(const PharmacyOnlineSettings()),
+        0,
+      ),
+    ];
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        for (final (label, icon, onTap, badge) in items)
+          _ActionButton(label: label, icon: icon, onTap: onTap, badge: badge),
+      ],
+    );
+  }
+
+  // ─────────────────────────── Attention ───────────────────────────
+
+  Widget _attention() {
+    if (_loading && _stats.isEmpty) {
+      return const PharmacyShimmer(
+        child: PharmacySkeletonBlock(height: 104, radius: 14),
+      );
+    }
+    if (_error != null) return const SizedBox.shrink();
+
+    final rows = [
+      (
+        LucideIcons.packageSearch,
+        'Low on stock',
+        _int(_stats['lowStock']),
+        PharmacyColors.warning,
+        0,
+      ),
+      (
+        LucideIcons.calendarClock,
+        'Expiring in 30 days',
+        _int(_stats['expiringBatches']),
+        PharmacyColors.warning,
+        1,
+      ),
+      (
+        LucideIcons.circleAlert,
+        'Expired batches',
+        _int(_stats['expiredBatches']),
+        PharmacyColors.error,
+        2,
+      ),
+    ].where((r) => r.$3 > 0).toList();
+    final openPos = _int(_stats['pendingOrders']);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle('Stock'),
+        _Group(
+          children: [
+            if (rows.isEmpty)
+              const _Row(
+                icon: LucideIcons.circleCheck,
+                label: 'Nothing low, expiring or expired',
+                iconColor: PharmacyColors.greenDark,
+              ),
+            for (final r in rows)
+              _Row(
+                icon: r.$1,
+                label: r.$2,
+                value: '${r.$3}',
+                valueColor: r.$4,
+                onTap: () => _open(StockAlertScreen(initialTab: r.$5)),
+              ),
+            if (openPos > 0)
+              _Row(
+                icon: LucideIcons.truck,
+                label: 'Open purchase orders',
+                value: '$openPos',
+                onTap: () => _open(const PharmacyProcurement()),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────── Inventory ───────────────────────────
+
+  Widget _inventory() {
+    if (_loading && _stats.isEmpty) return const SizedBox.shrink();
+    if (_error != null) return const SizedBox.shrink();
+
+    final retail = _num(_stats['inventoryRetailValue']);
+    final cost = _num(_stats['inventoryCostValue']);
+    final margin = retail - cost;
+    final share = retail > 0 ? (margin / retail).clamp(0.0, 1.0) : 0.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          'Inventory',
+          action: 'Add',
+          onAction: () => _open(const AddMedicine()),
+        ),
+        // Equal-height tiles: the margin tile carries a bar the other does not.
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _statTile(
+                  'Stock value',
+                  _rupees(retail),
+                  'at retail · ${_rupees(cost)} at cost',
                 ),
               ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _statTile(
+                  'Potential margin',
+                  '${(share * 100).round()}%',
+                  _rupees(margin),
+                  tone: PharmacyColors.greenDark,
+                  bar: share.toDouble(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _Group(
+          children: [
+            _Row(
+              icon: LucideIcons.pill,
+              label: 'Medicines listed',
+              value: _decimal(_int(_stats['totalMedicines'])),
             ),
-            const SizedBox(height: 9),
-            Padding(
-              padding: const EdgeInsets.only(left: 21),
-              child: InkWell(
-                onTap: _recheckVerification,
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 2,
-                  ),
-                  child: _recheckingVerification
-                      ? SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.8,
-                            color: tone,
-                          ),
-                        )
-                      : Text(
-                          'CHECK AGAIN',
-                          style: PharmacyType.sans(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.1,
-                            color: tone,
-                          ),
-                        ),
-                ),
-              ),
+            _Row(
+              icon: LucideIcons.boxes,
+              label: 'Units on shelf',
+              value: _decimal(_int(_stats['inventoryUnits'])),
+            ),
+            _Row(
+              icon: LucideIcons.users,
+              label: 'Active suppliers',
+              value: _decimal(_int(_stats['activeSuppliers'])),
             ),
           ],
         ),
-      ),
+      ],
     );
+  }
+
+  Widget _statTile(
+    String label,
+    String value,
+    String caption, {
+    Color? tone,
+    double? bar,
+  }) => Container(
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    decoration: BoxDecoration(
+      color: _panel,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: _Type.caption),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: _Type.figure.copyWith(
+              color: tone ?? PharmacyColors.textStrong,
+            ),
+          ),
+        ),
+        const Spacer(),
+        if (bar != null) ...[
+          _MarginBar(fraction: bar),
+          const SizedBox(height: 6),
+        ],
+        Text(
+          caption,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _Type.caption.copyWith(fontSize: PharmacyType.micro),
+        ),
+      ],
+    ),
+  );
+
+  // ───────────────────────────── Bills ─────────────────────────────
+
+  Widget _bills() {
+    if (_loading || _error != null) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          'Recent bills',
+          action: _sales.isEmpty ? null : 'See all',
+          onAction: () => _open(const PharmacySales()),
+        ),
+        _Group(
+          children: [
+            if (_sales.isEmpty)
+              const _Row(
+                icon: LucideIcons.receiptText,
+                label: 'No bills at this branch yet',
+              ),
+            for (final sale in _sales.take(5)) _billRow(sale),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _billRow(Map<String, dynamic> sale) {
+    final customer = sale['customerName']?.toString().trim();
+    final name = (customer == null || customer.isEmpty) ? 'Walk-in' : customer;
+    final amount = _num(sale['totalAmount']) - _num(sale['returnedAmount']);
+    final invoice =
+        sale['invoiceNumber']?.toString() ??
+        sale['saleNumber']?.toString() ??
+        '';
+    return _Row(
+      leading: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+        child: Text(
+          name[0].toUpperCase(),
+          style: PharmacyType.sans(
+            fontSize: PharmacyType.body,
+            fontWeight: FontWeight.w700,
+            color: PharmacyColors.greenDark,
+          ),
+        ),
+      ),
+      label: name,
+      subtitle: [
+        if (invoice.isNotEmpty) invoice,
+        _time(sale['createdAt']?.toString()),
+      ].where((v) => v.isNotEmpty).join('  ·  '),
+      value: _rupees(amount),
+      valueColor: PharmacyColors.textStrong,
+      onTap: () => _open(SaleDetailsScreen(sale: sale)),
+    );
+  }
+
+  // ─────────────────────────── Banner ──────────────────────────────
+
+  /// Feature slides with animated scenes, in place of the old static
+  /// banner image.
+  static const List<HomeSlide> _slides = [
+    (
+      title: 'Never miss an order',
+      body: 'New orders ring until someone accepts — even on a locked phone.',
+      cta: 'Orders',
+      art: HomeSlideArt.orders,
+      page: null,
+      tab: PharmacyTab.orders,
+    ),
+    (
+      title: 'Stay ahead of stock',
+      body: 'Low stock and expiring batches flagged before they cost you.',
+      cta: 'Stock alerts',
+      art: HomeSlideArt.stock,
+      page: StockAlertScreen(),
+      tab: null,
+    ),
+    (
+      title: 'Bring customers back',
+      body: 'Create coupons for online orders in under a minute.',
+      cta: 'Coupons',
+      art: HomeSlideArt.coupon,
+      page: PharmacyCoupons(),
+      tab: null,
+    ),
+  ];
+
+  Widget _banner() => HomeCarousel(
+    slides: _slides,
+    onOpen: (s) {
+      if (s.page != null) {
+        Navigator.of(context).push(PharmacyPageRoute(builder: (_) => s.page!));
+      } else if (s.tab != null) {
+        _goToTab(s.tab!);
+      }
+    },
+  );
+
+  // ───────────────────────── Verification ──────────────────────────
+
+  /// Shown only for an explicitly non-approved status; a null status means
+  /// the user record has not loaded yet.
+  List<Widget> _verificationNotice() {
+    final status = ref.watch(authProvider).user?.verificationStatus;
+    if (_verificationDismissed ||
+        status == null ||
+        status == VerificationStatus.approved) {
+      return const [];
+    }
+    final bad =
+        status == VerificationStatus.rejected ||
+        status == VerificationStatus.suspended;
+    final title = status == VerificationStatus.rejected
+        ? 'Verification rejected'
+        : status == VerificationStatus.suspended
+        ? 'Store suspended'
+        : 'Verification pending';
+    final body = status == VerificationStatus.rejected
+        ? 'Re-submit your documents from Profile. Inventory keeps working meanwhile.'
+        : status == VerificationStatus.suspended
+        ? 'Hidden from online orders. Contact support to restore it.'
+        : "Not listed for online orders yet. You can set up stock meanwhile.";
+    final tone = bad ? PharmacyColors.error : PharmacyColors.warning;
+
+    return [
+      const SizedBox(height: 12),
+      _Group(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 6, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: tone,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: _Type.body.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(body, style: _Type.caption.copyWith(height: 1.4)),
+                      const SizedBox(height: 6),
+                      PharmacyPressable(
+                        onTap: _recheckVerification,
+                        child: _recheckingVerification
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.8,
+                                ),
+                              )
+                            : Text(
+                                'Check again',
+                                style: _Type.caption.copyWith(
+                                  color: PharmacyColors.greenDark,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Dismiss',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () =>
+                      setState(() => _verificationDismissed = true),
+                  icon: const Icon(
+                    LucideIcons.x,
+                    size: 16,
+                    color: PharmacyColors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ];
   }
 
   Future<void> _recheckVerification() async {
@@ -843,389 +1064,46 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
     if (mounted) setState(() => _recheckingVerification = false);
   }
 
-  // ───────────────────────────── Actions ───────────────────────────
+  // ─────────────────────────── Branches ────────────────────────────
 
-  Widget _actionsGroup() {
-    // Three actions are commented out rather than deleted — New sale (walk-in
-    // POS), Transfers (multi-branch stock ops) and Coupons (merchant-funded
-    // promos, which in a marketplace the platform owns). Their screens are
-    // untouched and reachable again by restoring these entries.
-    final actions = <_HomeAction>[
-      // _HomeAction(
-      //   'New sale',
-      //   LucideIcons.shoppingCart,
-      //   () => _open(const NewSaleScreen()),
-      // ),
-      _HomeAction(
-        'Prescriptions',
-        LucideIcons.fileText,
-        () => _open(const PrescriptionQueue()),
-      ),
-      _HomeAction(
-        'Procurement',
-        LucideIcons.truck,
-        () => _open(const PharmacyProcurement()),
-      ),
-      _HomeAction(
-        'Stock alerts',
-        LucideIcons.triangleAlert,
-        () => _open(const StockAlertScreen()),
-      ),
-      // _HomeAction(
-      //   'Transfers',
-      //   LucideIcons.repeat2,
-      //   () => _open(const PharmacyInventoryOps()),
-      // ),
-      _HomeAction(
-        'Add medicine',
-        LucideIcons.packagePlus,
-        () => _open(const AddMedicine()),
-      ),
-      _HomeAction(
-        'Online store',
-        LucideIcons.store,
-        () => _open(const PharmacyOnlineSettings()),
-      ),
-      // _HomeAction(
-      //   'Coupons',
-      //   LucideIcons.ticketPercent,
-      //   () => _open(const PharmacyCoupons()),
-      // ),
-      _HomeAction(
-        'Orders',
-        LucideIcons.clipboardList,
-        () => _open(const PharmacyOrders()),
-      ),
-    ];
-    return _group([
-      _actionRow(actions.sublist(0, 3)),
-      _hairline,
-      _actionRow(actions.sublist(3, 6)),
-    ]);
-  }
-
-  Widget _actionRow(List<_HomeAction> row) => IntrinsicHeight(
-    child: Row(
-      children: [
-        for (var i = 0; i < row.length; i++)
-          Expanded(
-            child: Container(
-              decoration: i == row.length - 1
-                  ? null
-                  : const BoxDecoration(
-                      border: Border(
-                        right: BorderSide(color: PharmacyColors.border),
-                      ),
-                    ),
-              child: Material(
-                color: PharmacyColors.bg,
-                child: InkWell(
-                  onTap: row[i].onTap,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 13,
-                      horizontal: 4,
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          row[i].icon,
-                          size: 19,
-                          color: PharmacyColors.greenDark,
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          row[i].label,
-                          maxLines: 2,
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          style: PharmacyType.sans(
-                            fontSize: 10.5,
-                            height: 1.2,
-                            fontWeight: FontWeight.w600,
-                            color: PharmacyColors.textHeading,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    ),
-  );
-
-  // ───────────────────────── Banner ──────────────────────
-
-  /// Brand artwork, sat between the action chrome and the data tables so it
-  /// breaks the page rather than pushing the day's numbers below the fold.
-  /// Inset and radiused to the same 16/13 as every group on this screen, and
-  /// carried at the asset's own 2.625 aspect so nothing is cropped or
-  /// stretched. If the asset ever goes missing the slot collapses instead of
-  /// leaving a grey hole.
-  Widget _banner() => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(13),
-      child: AspectRatio(
-        aspectRatio: 2032 / 774,
-        child: Image.asset(
-          'assets/banner.png',
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const SizedBox.shrink(),
-        ),
-      ),
-    ),
-  );
-
-  // ──────────────────────────── Inventory ──────────────────────────
-
-  Widget _inventoryGroup() {
-    if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16),
-        child: PharmacyListSkeleton(count: 2),
-      );
-    }
-    if (_error != null) return const SizedBox.shrink();
-
-    final retail =
-        num.tryParse('${_stats['inventoryRetailValue'] ?? 0}')?.toDouble() ?? 0;
-    final cost =
-        num.tryParse('${_stats['inventoryCostValue'] ?? 0}')?.toDouble() ?? 0;
-    final margin = retail - cost;
-    final marginPct = cost > 0 ? (margin / cost) * 100 : null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _label(
-          'INVENTORY',
-          action: '+ ADD',
-          onAction: () => _open(const AddMedicine()),
-        ),
-        _group([
-          _dataRow(
-            'Medicines listed',
-            _decimal(_int(_stats['totalMedicines'])),
-          ),
-          _hairline,
-          _dataRow('Units on shelf', _decimal(_int(_stats['inventoryUnits']))),
-          _hairline,
-          _dataRow('Stock value at retail', _rupees(retail)),
-          _hairline,
-          _dataRow('Stock value at cost', _rupees(cost)),
-          _hairline,
-          _dataRow(
-            'Potential margin',
-            _rupees(margin),
-            valueColor: PharmacyColors.greenDark,
-            trailing: marginPct == null
-                ? null
-                : '${marginPct >= 0 ? '+' : ''}${marginPct.toStringAsFixed(1)}%',
-          ),
-          _hairline,
-          _dataRow(
-            'Active suppliers',
-            _decimal(_int(_stats['activeSuppliers'])),
-          ),
-        ]),
-        const SizedBox(height: 22),
-      ],
-    );
-  }
-
-  Widget _dataRow(
-    String label,
-    String value, {
-    Color? valueColor,
-    String? trailing,
-  }) => Container(
-    color: PharmacyColors.bg,
-    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: PharmacyType.sans(
-              fontSize: 12.5,
-              color: PharmacyColors.textSecondary,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          value,
-          style: PharmacyType.number(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.2,
-            color: valueColor ?? PharmacyColors.textStrong,
-          ),
-        ),
-        if (trailing != null) ...[
-          const SizedBox(width: 7),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: PharmacyColors.greenVeryLight,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              trailing,
-              style: PharmacyType.sans(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: PharmacyColors.greenDark,
-              ),
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
-
-  // ────────────────────────────── Bills ────────────────────────────
-
-  Widget _billsGroup() {
-    if (_loading || _error != null) return const SizedBox.shrink();
-    if (_sales.isEmpty) {
-      return Column(
+  void _switchBranch(PharmacyStoreState storeState) {
+    if (storeState.stores.length <= 1) return;
+    showPharmacySheet<void>(
+      context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _label('RECENT BILLS'),
-          _group([
-            Container(
-              color: PharmacyColors.bg,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-              child: const PharmacyEmptyStateInline(
-                icon: LucideIcons.receiptText,
-                text: 'No bills raised at this branch yet',
-              ),
-            ),
-          ]),
-        ],
-      );
-    }
-
-    final rows = <Widget>[];
-    for (final sale in _sales.take(6)) {
-      if (rows.isNotEmpty) rows.add(_hairline);
-      rows.add(_billRow(sale));
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _label(
-          'RECENT BILLS',
-          action: 'ALL SALES',
-          onAction: () => _open(const PharmacySales()),
-        ),
-        _group(rows),
-      ],
-    );
-  }
-
-  Widget _billRow(Map<String, dynamic> sale) {
-    final customer = sale['customerName']?.toString().trim();
-    final name = (customer == null || customer.isEmpty) ? 'Walk-in' : customer;
-    final invoice =
-        sale['invoiceNumber']?.toString() ??
-        sale['saleNumber']?.toString() ??
-        '';
-    final amount =
-        (num.tryParse('${sale['totalAmount'] ?? 0}') ?? 0) -
-        (num.tryParse('${sale['returnedAmount'] ?? 0}') ?? 0);
-    final meta = [
-      if (invoice.isNotEmpty) invoice,
-      _time(sale['createdAt']?.toString()),
-    ].where((v) => v.isNotEmpty).join('  ·  ');
-
-    return Material(
-      color: PharmacyColors.bg,
-      child: InkWell(
-        onTap: () => _open(SaleDetailsScreen(sale: sale)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-          child: Row(
+          Text('Switch branch', style: _Type.title),
+          const SizedBox(height: 14),
+          _Group(
             children: [
-              Container(
-                width: 30,
-                height: 30,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(
-                  color: PharmacyColors.bgSecondary,
-                  shape: BoxShape.circle,
+              for (final s in storeState.stores)
+                _Row(
+                  icon: LucideIcons.store,
+                  label: s['name']?.toString() ?? 'Pharmacy branch',
+                  trailing: s['_id']?.toString() == storeState.selectedStoreId
+                      ? const Icon(
+                          LucideIcons.check,
+                          size: 18,
+                          color: PharmacyColors.green,
+                        )
+                      : const SizedBox.shrink(),
+                  onTap: () {
+                    ref
+                        .read(pharmacyStoreProvider.notifier)
+                        .selectStore('${s['_id']}');
+                    Navigator.pop(ctx);
+                  },
                 ),
-                child: Text(
-                  name[0].toUpperCase(),
-                  style: PharmacyType.sans(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: PharmacyColors.textSecondary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: PharmacyType.sans(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: PharmacyColors.textPrimary,
-                      ),
-                    ),
-                    if (meta.isNotEmpty) ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        meta,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: PharmacyType.sans(
-                          fontSize: 10.5,
-                          color: PharmacyColors.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _rupees(amount),
-                style: PharmacyType.number(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
-                  color: PharmacyColors.textStrong,
-                ),
-              ),
-              const SizedBox(width: 3),
-              const Icon(
-                LucideIcons.chevronRight,
-                size: 14,
-                color: PharmacyColors.textDisabled,
-              ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 
-  // ───────────────────────────── Helpers ───────────────────────────
+  // ─────────────────────────── Helpers ─────────────────────────────
 
   static Map<String, dynamic> _map(dynamic value) =>
       value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
@@ -1235,23 +1113,21 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
       : <Map<String, dynamic>>[];
 
   static int _int(dynamic value) => num.tryParse('${value ?? 0}')?.toInt() ?? 0;
+  static double _num(dynamic value) =>
+      num.tryParse('${value ?? 0}')?.toDouble() ?? 0;
 
   static final _decimalFormat = NumberFormat.decimalPattern('en_IN');
   static String _decimal(int value) => _decimalFormat.format(value);
 
-  /// Indian digit grouping — pharmacy figures read as ₹12,68,500 (lakh
-  /// grouping), not ₹1,268,500.
   static final _inr = NumberFormat.currency(
     locale: 'en_IN',
     symbol: '₹',
     decimalDigits: 0,
   );
-
-  static String _rupees(dynamic value) =>
-      _inr.format(num.tryParse(value?.toString() ?? '') ?? 0);
+  static String _rupees(num value) => _inr.format(value);
 
   static String _time(String? iso) {
-    final d = iso == null ? null : DateTime.tryParse(iso);
+    final d = iso == null ? null : DateTime.tryParse(iso)?.toLocal();
     if (d == null) return '';
     final now = DateTime.now();
     final sameDay =
@@ -1272,9 +1148,424 @@ class _PharmacyHomeState extends ConsumerState<PharmacyHome> {
   }
 }
 
-class _HomeAction {
+// ═════════════════════════ Minimal building blocks ═════════════════════════
+
+/// The type scale for this screen. Five styles, nothing else.
+class _Type {
+  _Type._();
+
+  static final display = PharmacyType.number(
+    fontSize: 26,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -1.2,
+    height: 1.05,
+    color: PharmacyColors.textStrong,
+  );
+  static final figure = PharmacyType.number(
+    fontSize: 17,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.4,
+    color: PharmacyColors.textStrong,
+  );
+  static final title = PharmacyType.sans(
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.3,
+    color: PharmacyColors.textStrong,
+  );
+  static final body = PharmacyType.sans(
+    fontSize: 13,
+    fontWeight: FontWeight.w500,
+    color: PharmacyColors.textPrimary,
+  );
+  static final caption = PharmacyType.sans(
+    fontSize: 11.5,
+    fontWeight: FontWeight.w500,
+    color: PharmacyColors.textSecondary,
+  );
+}
+
+/// Grey panel fill — the only surface below the header.
+const _panel = PharmacyColors.panel;
+
+/// One fade-and-rise per section, not per item: motion marks the arrival
+/// of the page, then gets out of the way.
+class _Section extends StatelessWidget {
+  final int index;
+  final Widget child;
+  const _Section({required this.index, required this.child});
+
+  @override
+  Widget build(BuildContext context) =>
+      PharmacyEntrance(index: index, offsetY: 8, child: child);
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+  const _SectionTitle(this.text, {this.action, this.onAction});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            style: _Type.body.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: PharmacyColors.textStrong,
+            ),
+          ),
+        ),
+        if (action != null)
+          GestureDetector(
+            onTap: onAction,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Text(
+                action!,
+                style: _Type.caption.copyWith(
+                  color: PharmacyColors.greenDark,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// A grouped panel: rows separated by inset hairlines, no border, no shadow.
+class _Group extends StatelessWidget {
+  final List<Widget> children;
+  const _Group({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) {
+        rows.add(
+          Container(
+            height: 1,
+            margin: const EdgeInsets.only(left: 16),
+            color: Colors.white,
+          ),
+        );
+      }
+      rows.add(children[i]);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: _panel,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: rows),
+    );
+  }
+}
+
+/// A list row: optional neutral icon, label (+ subtitle), right-aligned
+/// value, chevron when tappable.
+class _Row extends StatelessWidget {
+  final IconData? icon;
+  final Widget? leading;
+  final Color iconColor;
+  final String label;
+  final String? subtitle;
+  final String? value;
+  final Color? valueColor;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  const _Row({
+    this.icon,
+    this.leading,
+    this.iconColor = PharmacyColors.textHeading,
+    required this.label,
+    this.subtitle,
+    this.value,
+    this.valueColor,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          if (leading != null) ...[
+            leading!,
+            const SizedBox(width: 12),
+          ] else if (icon != null) ...[
+            Icon(icon, size: 18, color: iconColor),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _Type.body,
+                ),
+                if (subtitle != null && subtitle!.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _Type.caption.copyWith(fontSize: 11.5),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (value != null) ...[
+            const SizedBox(width: 10),
+            Text(
+              value!,
+              style: PharmacyType.number(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: valueColor ?? PharmacyColors.textSecondary,
+              ),
+            ),
+          ],
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+          if (onTap != null && trailing == null) ...[
+            const SizedBox(width: 6),
+            const Icon(
+              LucideIcons.chevronRight,
+              size: 17,
+              color: PharmacyColors.textDisabled,
+            ),
+          ],
+        ],
+      ),
+    );
+    if (onTap == null) return row;
+    return PharmacyPressable(scale: 0.99, onTap: onTap, child: row);
+  }
+}
+
+class _ActionButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  const _HomeAction(this.label, this.icon, this.onTap);
+  final int badge;
+
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PharmacyPressable(
+      onTap: onTap,
+      scale: 0.92,
+      semanticLabel: badge > 0 ? '$label, $badge waiting' : label,
+      child: SizedBox(
+        width: 62,
+        child: Column(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: PharmacyColors.greenVeryLight,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 19, color: PharmacyColors.greenDark),
+                ),
+                if (badge > 0)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: PharmacyColors.warning,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: _Type.caption.copyWith(
+                fontSize: 11.5,
+                color: PharmacyColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MarginBar extends StatelessWidget {
+  final double fraction;
+  const _MarginBar({required this.fraction});
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = PharmacyMotion.reduced(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: Container(
+        height: 6,
+        color: Colors.white,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: reduced ? fraction : 0, end: fraction),
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeOutCubic,
+          builder: (_, f, _) => Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: f,
+              child: Container(color: PharmacyColors.green),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────── Live orders row ───────────────────────────
+
+/// The one live element on Home. A quiet row when nothing is waiting; a
+/// green-tinted row with a pulsing dot when something is. Its own widget so
+/// the wait time can refresh without rebuilding the page.
+class _LiveOrdersRow extends StatefulWidget {
+  final List<Map<String, dynamic>> awaiting;
+  final VoidCallback onOpen;
+  const _LiveOrdersRow({required this.awaiting, required this.onOpen});
+
+  @override
+  State<_LiveOrdersRow> createState() => _LiveOrdersRowState();
+}
+
+class _LiveOrdersRowState extends State<_LiveOrdersRow> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && widget.awaiting.isNotEmpty) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  String? get _oldest {
+    DateTime? oldest;
+    for (final o in widget.awaiting) {
+      final d = DateTime.tryParse('${o['createdAt'] ?? ''}')?.toLocal();
+      if (d != null && (oldest == null || d.isBefore(oldest))) oldest = d;
+    }
+    if (oldest == null) return null;
+    final w = DateTime.now().difference(oldest);
+    if (w.inMinutes < 1) return 'just now';
+    if (w.inMinutes < 60) return '${w.inMinutes} min';
+    if (w.inHours < 24) return '${w.inHours} hr';
+    return '${w.inDays} d';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.awaiting.length;
+    final waiting = count > 0;
+    final oldest = _oldest;
+
+    return PharmacyPressable(
+      onTap: widget.onOpen,
+      scale: 0.985,
+      semanticLabel: waiting ? '$count orders waiting' : 'No orders waiting',
+      child: AnimatedContainer(
+        duration: PharmacyMotion.medium,
+        padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+        decoration: BoxDecoration(
+          color: waiting ? PharmacyColors.greenVeryLight : _panel,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            waiting
+                ? const PharmacyPulse(size: 8)
+                : Container(
+                    width: 20.8,
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: PharmacyColors.textDisabled,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                waiting
+                    ? '$count ${count == 1 ? 'order' : 'orders'} waiting'
+                    : 'No orders waiting',
+                style: _Type.body.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: waiting
+                      ? PharmacyColors.textStrong
+                      : PharmacyColors.textSecondary,
+                ),
+              ),
+            ),
+            if (waiting && oldest != null)
+              Text(
+                'oldest $oldest',
+                style: _Type.caption.copyWith(color: PharmacyColors.greenDark),
+              ),
+            const SizedBox(width: 6),
+            Icon(
+              LucideIcons.chevronRight,
+              size: 17,
+              color: waiting
+                  ? PharmacyColors.greenDark
+                  : PharmacyColors.textDisabled,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

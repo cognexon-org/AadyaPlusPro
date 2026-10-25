@@ -1,9 +1,8 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../features/notifications/screens/notification_screen.dart';
 import '../../features/pharmacy/screens/order_details_screen.dart';
-import '../network/api_service.dart';
+import '../../features/pharmacy/widgets/pharmacy_motion.dart';
 
 /// Safe navigation target for push notifications in AadyaPlusPro.
 ///
@@ -23,6 +22,15 @@ class ProfessionalNotificationNavigationService {
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
+  /// Builds the appointment details screen for an appointment id. Set by
+  /// the dashboard for doctors and physiotherapists (each has its own
+  /// details screen); null for other roles, whose appointment notifications
+  /// open the notification centre.
+  static Widget Function(String appointmentId)? appointmentScreen;
+
+  /// The lab order screen, set by the dashboard for pathology labs.
+  static Widget Function(String labTestId)? labOrderScreen;
+
   Map<String, dynamic>? _pending;
   bool _authenticatedReady = false;
 
@@ -40,58 +48,82 @@ class ProfessionalNotificationNavigationService {
 
     _pending = null;
 
-    final target = await _resolve(data);
-    await navigator.push(
-      MaterialPageRoute(
-        builder: (_) => target ?? const ProfessionalNotificationScreen(),
-      ),
+    await navigator.push(_routeFor(data));
+  }
+
+  /// The screen for a payload, built *immediately* — no network wait before
+  /// it opens. An order notification opens the order screen with just the
+  /// id; that screen paints from memory or a skeleton and fetches the order
+  /// itself. Waiting for the fetch before navigating left a tap looking
+  /// like it had done nothing for a second or two.
+  Route<void> _routeFor(Map<String, dynamic> data) {
+    final labId = _labTestId(data);
+    final labScreen = ProfessionalNotificationNavigationService.labOrderScreen;
+    if (labId != null && labScreen != null) {
+      return PharmacyPageRoute(builder: (_) => labScreen(labId));
+    }
+    final appointmentId = _appointmentId(data);
+    final appointmentScreen =
+        ProfessionalNotificationNavigationService.appointmentScreen;
+    if (appointmentId != null && appointmentScreen != null) {
+      return PharmacyPageRoute(
+        builder: (_) => appointmentScreen(appointmentId),
+      );
+    }
+    final id = _orderId(data);
+    if (id == null) {
+      return MaterialPageRoute(
+        builder: (_) => const ProfessionalNotificationScreen(),
+      );
+    }
+    return PharmacyPageRoute(
+      builder: (_) => OrderDetailsScreen(order: {'_id': id}),
     );
   }
 
-  /// Turns a payload into a screen, or null to use the notification centre.
-  ///
-  /// The order is fetched here rather than passed through the payload: a push
-  /// carries a handful of strings, and the details screen needs the whole
-  /// record. Fetching also means a stale notification opens the order as it is
-  /// *now*, not as it was when the push was sent.
-  Future<Widget?> _resolve(Map<String, dynamic> data) async {
+  /// The pharmacy order a payload points at, or null for anything else.
+  String? _orderId(Map<String, dynamic> data) {
     final entity = '${data['relatedEntity'] ?? data['entityType'] ?? ''}';
     if (entity != 'pharmacy_order') return null;
-
     final id = '${data['relatedEntityId'] ?? data['orderId'] ?? ''}'.trim();
-    if (id.isEmpty) return null;
+    return id.isEmpty ? null : id;
+  }
 
-    try {
-      final response = await ApiService().getMerchantOrder(id);
-      final body = response.data;
-      if (body is Map && body['order'] is Map) {
-        return OrderDetailsScreen(
-          order: Map<String, dynamic>.from(body['order'] as Map),
-        );
-      }
-    } on DioException {
-      // Not this pharmacy's order, deleted, or offline — the notification
-      // centre is a safe landing spot rather than an error screen.
-    }
-    return null;
+  /// The lab order (LabTest) a payload points at, or null.
+  String? _labTestId(Map<String, dynamic> data) {
+    final entity = '${data['relatedEntity'] ?? data['entityType'] ?? ''}';
+    if (entity.toLowerCase() != 'labtest') return null;
+    final id = '${data['relatedEntityId'] ?? data['labTestId'] ?? ''}'.trim();
+    return id.isEmpty ? null : id;
+  }
+
+  /// The doctor/physio appointment a payload points at, or null.
+  String? _appointmentId(Map<String, dynamic> data) {
+    final entity = '${data['relatedEntity'] ?? data['entityType'] ?? ''}';
+    if (entity.toLowerCase() != 'appointment') return null;
+    final id = '${data['relatedEntityId'] ?? data['appointmentId'] ?? ''}'
+        .trim();
+    return id.isEmpty ? null : id;
   }
 
   /// Opens a notification the user tapped in the in-app list.
   ///
   /// The stored record nests its deep-link fields differently from a push
-  /// payload, so they are flattened here rather than teaching [_resolve] about
-  /// two shapes.
+  /// payload, so they are flattened here first. Non-order notifications have
+  /// nowhere further to go, so the tap stays in the list.
   Future<void> openFromRecord(Map<String, dynamic> row) async {
     final data = <String, dynamic>{
       if (row['data'] is Map) ...Map<String, dynamic>.from(row['data'] as Map),
       'relatedEntity': row['relatedEntity'],
       'relatedEntityId': row['relatedEntityId'],
     };
-    final target = await _resolve(data);
-    if (target == null) return;
+    final opensAppointment =
+        (_appointmentId(data) != null && appointmentScreen != null) ||
+        (_labTestId(data) != null && labOrderScreen != null);
+    if (_orderId(data) == null && !opensAppointment) return;
     final navigator = navigatorKey.currentState;
     if (navigator == null) return;
-    await navigator.push(MaterialPageRoute(builder: (_) => target));
+    await navigator.push(_routeFor(data));
   }
 
   Future<void> drainPending() async {

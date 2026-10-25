@@ -57,9 +57,9 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
       if (data is Map && data['success'] == true) {
         _messages = (data['messages'] is List)
             ? (data['messages'] as List)
-                .whereType<Map>()
-                .map((row) => Map<String, dynamic>.from(row))
-                .toList()
+                  .whereType<Map>()
+                  .map((row) => Map<String, dynamic>.from(row))
+                  .toList()
             : <Map<String, dynamic>>[];
       } else {
         throw Exception(
@@ -260,14 +260,15 @@ class _AppChatScreenState extends ConsumerState<AppChatScreen> {
                               ),
                               decoration: BoxDecoration(
                                 color: isMe ? AppTheme.primary : Colors.white,
-                                borderRadius: BorderRadius.circular(16).copyWith(
-                                  bottomRight: isMe
-                                      ? const Radius.circular(0)
-                                      : const Radius.circular(16),
-                                  bottomLeft: !isMe
-                                      ? const Radius.circular(0)
-                                      : const Radius.circular(16),
-                                ),
+                                borderRadius: BorderRadius.circular(16)
+                                    .copyWith(
+                                      bottomRight: isMe
+                                          ? const Radius.circular(0)
+                                          : const Radius.circular(16),
+                                      bottomLeft: !isMe
+                                          ? const Radius.circular(0)
+                                          : const Radius.circular(16),
+                                    ),
                                 border: isMe
                                     ? null
                                     : Border.all(color: AppTheme.border),

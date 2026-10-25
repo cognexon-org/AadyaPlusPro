@@ -17,6 +17,19 @@ import 'package:google_fonts/google_fonts.dart';
 class PharmacyType {
   PharmacyType._();
 
+  // ── Type scale ─────────────────────────────────────────────────────────
+  // Eight sizes, and only these. Every text style in the module uses one of
+  // them; anything else is a bug. (The module had drifted to twenty sizes,
+  // which is why screens felt inconsistent.)
+  static const double micro = 10.5; // badges, tiny tags
+  static const double caption = 11.5; // secondary lines, timestamps
+  static const double small = 12.5; // field labels, meta
+  static const double body = 13; // row text, inputs, buttons
+  static const double title = 15; // card titles, names, sheet titles
+  static const double heading = 17; // screen titles, large values
+  static const double figure = 20; // secondary big numbers
+  static const double display = 26; // the one hero number on a screen
+
   static const _face = GoogleFonts.plusJakartaSans;
 
   static TextStyle sans({

@@ -120,11 +120,15 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
         _loadedStoreId = storeId;
         _loading = false;
       });
-    } on DioException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
+        // Recorded on failure too, or build() retries this branch forever.
+        _loadedStoreId = storeId;
         _loading = false;
-        _error = _message(e);
+        _error = e is DioException
+            ? _message(e)
+            : pharmacyErrorMessage(e, fallback: "Couldn't load sales.");
       });
     }
   }
@@ -200,7 +204,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
         onPressed: () async {
           await Navigator.of(
             context,
-          ).push(MaterialPageRoute(builder: (_) => const NewSaleScreen()));
+          ).push(PharmacyPageRoute(builder: (_) => const NewSaleScreen()));
           if (mounted) await _load();
         },
       ),
@@ -379,7 +383,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
             value,
             maxLines: 1,
             style: PharmacyType.number(
-              fontSize: 15,
+              fontSize: 13,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
               color: PharmacyColors.textStrong,
@@ -410,7 +414,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
             child: Text(
               bucket.toUpperCase(),
               style: PharmacyType.sans(
-                fontSize: 9.5,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.4,
                 color: PharmacyColors.textTertiary,
@@ -447,7 +451,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
           borderRadius: BorderRadius.circular(14),
           onTap: () async {
             await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => SaleDetailsScreen(sale: sale)),
+              PharmacyPageRoute(builder: (_) => SaleDetailsScreen(sale: sale)),
             );
             if (mounted) await _load();
           },
@@ -476,7 +480,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                           child: Text(
                             name[0].toUpperCase(),
                             style: PharmacyType.sans(
-                              fontSize: 14.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                               color: PharmacyColors.greenDark,
                             ),
@@ -492,7 +496,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: PharmacyType.sans(
-                                  fontSize: 13.5,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   color: PharmacyColors.textStrong,
                                 ),
@@ -503,7 +507,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: PharmacyType.sans(
-                                  fontSize: 11,
+                                  fontSize: 11.5,
                                   color: PharmacyColors.textTertiary,
                                 ),
                               ),
@@ -517,7 +521,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                             Text(
                               _rupees(_net(sale)),
                               style: PharmacyType.number(
-                                fontSize: 15,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.3,
                                 color: PharmacyColors.textStrong,
@@ -531,7 +535,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                                   ? 'Paid'
                                   : _titleCase(method),
                               style: PharmacyType.sans(
-                                fontSize: 10,
+                                fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
                                 color: balance > 0
                                     ? PharmacyColors.warning
@@ -563,7 +567,7 @@ class _PharmacySalesState extends ConsumerState<PharmacySales> {
                             child: Text(
                               '${_rupees(returned)} returned',
                               style: PharmacyType.sans(
-                                fontSize: 9.5,
+                                fontSize: 10.5,
                                 fontWeight: FontWeight.w700,
                                 color: PharmacyColors.error,
                               ),

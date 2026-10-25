@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/network/api_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../pharmacy/theme/pharmacy_colors.dart';
 import '../../auth/models/user_model.dart';
@@ -17,6 +19,7 @@ import '../../doctor/screens/doctor_profile.dart';
 
 import '../../physio/screens/physio_home.dart';
 import '../../physio/screens/physio_appointments.dart';
+import '../../physio/screens/physio_appointment_details.dart';
 import '../../physio/screens/physio_patients.dart';
 import '../../physio/screens/physio_earnings.dart';
 import '../../physio/screens/physio_profile.dart';
@@ -26,6 +29,9 @@ import '../../pathology/screens/pathology_orders.dart';
 import '../../pathology/screens/pathology_test_catalog.dart';
 import '../../pathology/screens/pathology_earnings.dart';
 import '../../pathology/screens/pathology_profile.dart';
+import '../../pathology/screens/pathology_order_detail.dart';
+import '../../pathology/providers/lab_providers.dart';
+import '../../pathology/widgets/lab_ui.dart' as lab;
 
 import '../../pharmacy/screens/pharmacy_home.dart';
 import '../../pharmacy/screens/pharmacy_orders.dart';
@@ -36,6 +42,16 @@ import '../../pharmacy/screens/pharmacy_earnings.dart';
 // import '../../pharmacy/screens/pharmacy_sales.dart';
 import '../../pharmacy/screens/pharmacy_profile.dart';
 import '../../pharmacy/providers/pharmacy_store_provider.dart';
+import '../../pharmacy/providers/pharmacy_orders_provider.dart';
+import '../../pharmacy/providers/pharmacy_nav_provider.dart';
+import '../../pharmacy/widgets/pharmacy_nav_bar.dart';
+import '../../pharmacy/services/pharmacy_order_ringer.dart';
+import '../../pharmacy/widgets/pharmacy_new_order_banner.dart';
+import '../../doctor/providers/doctor_appointments_provider.dart';
+import '../../doctor/widgets/doctor_ui.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../pharmacy/widgets/pharmacy_ui.dart'
+    show PharmacyScrollScope, PharmacyOfflineBanner;
 import '../../mr/screens/mr_home.dart';
 import '../../mr/screens/mr_calls.dart';
 import '../../mr/screens/mr_work.dart';
@@ -57,6 +73,9 @@ class DashboardShell extends ConsumerStatefulWidget {
 class _DashboardShellState extends ConsumerState<DashboardShell> {
   int _currentIndex = 0;
   bool _bannerDismissed = false;
+  bool _pharmacyBooted = false;
+  bool _doctorBooted = false;
+  bool _labBooted = false;
   Timer? _notificationTimer;
   StreamSubscription<int>? _pushNotificationSubscription;
 
@@ -87,6 +106,15 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
         .notificationEvents
         .listen((_) {
           if (!mounted) return;
+          final role = ref.read(authProvider).user?.role;
+          if (role == UserRole.pharmacy) {
+            ref.read(pharmacyOrdersProvider.notifier).pollNow();
+          } else if (_isClinician(role)) {
+            ref.read(doctorAppointmentsProvider.notifier).load(silent: true);
+          } else if (role == UserRole.pathology) {
+            ref.read(labOrdersProvider.notifier).load(silent: true);
+            ref.read(labDashboardProvider.notifier).load(silent: true);
+          }
           ref
               .read(professionalNotificationProvider.notifier)
               .refresh(silent: true);
@@ -106,7 +134,28 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     ProfessionalNotificationNavigationService.instance.setAuthenticatedReady(
       false,
     );
+    ProfessionalNotificationNavigationService.appointmentScreen = null;
+    ProfessionalNotificationNavigationService.labOrderScreen = null;
     super.dispose();
+  }
+
+  static bool _isClinician(UserRole? role) =>
+      role == UserRole.doctor || role == UserRole.physiotherapist;
+
+  /// The details screen for one appointment, for this role. Starts from the
+  /// copy already in the list when there is one (so it paints filled in);
+  /// the screen fetches the latest itself either way.
+  Widget _appointmentScreen(String id) {
+    final known = ref
+        .read(doctorAppointmentsProvider)
+        .all
+        .where((a) => '${a['_id']}' == id);
+    final appointment = known.isEmpty
+        ? <String, dynamic>{'_id': id}
+        : known.first;
+    return ref.read(authProvider).user?.role == UserRole.physiotherapist
+        ? PhysioAppointmentDetails(appointment: appointment)
+        : AppointmentDetailsScreen(appointment: appointment);
   }
 
   List<Widget> _getPages(UserRole role) {
@@ -320,6 +369,107 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     }
   }
 
+  /// Rings and shows a banner for an order that just arrived. A pharmacy
+  /// works with the phone on the counter; the haptic and sound are what
+  /// stop an order sitting unseen.
+  /// A patient asked for an appointment. Treated like a pharmacy's new
+  /// order: it rings until someone looks (an unanswered request is declined
+  /// automatically) and joins the app-wide banner stack until dismissed or
+  /// answered.
+  void _announceNewRequest() {
+    final state = ref.read(doctorAppointmentsProvider);
+    final fresh = state.lastArrivals;
+    if (fresh.isEmpty || !mounted) return;
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.alert);
+    final noun = ref.read(authProvider).user?.role == UserRole.physiotherapist
+        ? 'session'
+        : 'appointment';
+    String when(Map<String, dynamic> a) =>
+        '${dayLabel(apptStart(a))}, ${timeLabel(apptStart(a))}';
+
+    final first = fresh.first;
+    PharmacyOrderRinger.instance.ringAppointments(
+      latest: first,
+      waiting: state.requests.length,
+      who: patientName(first),
+      when: when(first),
+      noun: noun,
+    );
+
+    // Oldest first, so the newest ends on top of the stack.
+    final banner = ref.read(pharmacyOrderBannerProvider.notifier);
+    for (final a in fresh.reversed) {
+      banner.addAppointment(
+        a,
+        title: 'New $noun request',
+        subtitle: [
+          patientName(a),
+          when(a),
+          capitalised(apptType(a) == 'home' ? 'home visit' : apptType(a)),
+        ].where((v) => v.trim().isNotEmpty).join(' · '),
+      );
+    }
+  }
+
+  /// A new lab booking: buzz, chime and add it to the app-wide banner
+  /// stack. Bookings are confirmed automatically, so there's nothing to
+  /// accept — no repeating alarm, just make sure it's seen.
+  void _announceLabBooking() {
+    final fresh = ref.read(labOrdersProvider).lastArrivals;
+    if (fresh.isEmpty || !mounted) return;
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.alert);
+    final banner = ref.read(pharmacyOrderBannerProvider.notifier);
+    for (final o in fresh.reversed) {
+      banner.addAppointment(
+        o,
+        kind: 'labtest',
+        title: lab.labIsHome(o) ? 'New home collection' : 'New lab booking',
+        subtitle: [
+          lab.labPatientName(o),
+          lab.labTestSummary(o),
+          '${lab.dayLabel(lab.labSlot(o))}, ${lab.timeLabel(lab.labSlot(o))}',
+        ].join(' · '),
+      );
+    }
+    ref.read(labDashboardProvider.notifier).load(silent: true);
+  }
+
+  void _announceNewOrder() {
+    final state = ref.read(pharmacyOrdersProvider);
+    final order = state.lastArrival;
+    if (order == null || !mounted) return;
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.alert);
+    // Repeats until someone opens Orders or taps the alert (see
+    // [_acknowledgeOrders]); a single chime is easy to miss at a counter.
+    PharmacyOrderRinger.instance.ring(
+      latest: order,
+      waiting: state.awaitingOrders.length,
+    );
+
+    // App-wide banner. Oldest first, so the newest ends on top of the stack.
+    final banner = ref.read(pharmacyOrderBannerProvider.notifier);
+    final arrivals = state.lastArrivals.isEmpty ? [order] : state.lastArrivals;
+    for (final o in arrivals.reversed) {
+      banner.add(o);
+    }
+  }
+
+  /// Someone has looked at the orders: stop ringing. The banner is left
+  /// alone — only the user clears it (see PharmacyOrderBannerNotifier).
+  void _acknowledgeOrders() {
+    PharmacyOrderRinger.instance.stop();
+  }
+
+  void _selectTab(int index) {
+    setState(() => _currentIndex = index);
+    // Orders (pharmacy) and Appointments/Sessions (doctor, physio) are both
+    // the second tab: opening it is someone looking, so the ringing stops.
+    if (index == PharmacyTab.orders) _acknowledgeOrders();
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
@@ -329,10 +479,141 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     final roleColor = _getRoleColor(role);
 
     if (role == UserRole.pharmacy) {
-      Future.microtask(
-        () => ref.read(pharmacyStoreProvider.notifier).initialize(),
+      // Once per shell, not once per build: this used to re-run the branch
+      // initialiser on every rebuild of the dashboard.
+      if (!_pharmacyBooted) {
+        _pharmacyBooted = true;
+        Future.microtask(() async {
+          await ref.read(pharmacyStoreProvider.notifier).initialize();
+          if (mounted) {
+            ref.read(pharmacyOrdersProvider.notifier).startLiveUpdates();
+          }
+        });
+      }
+      ref.listen<int>(pharmacyOrdersProvider.select((s) => s.arrivalTick), (
+        previous,
+        next,
+      ) {
+        if (previous != null && next > previous) _announceNewOrder();
+      });
+      ref.listen<int>(
+        pharmacyOrdersProvider.select((s) => s.awaitingOrders.length),
+        (_, next) {
+          if (next == 0) _acknowledgeOrders();
+        },
       );
+      // An order accepted, rejected or cancelled leaves the banner.
+      ref.listen<String>(
+        pharmacyOrdersProvider.select(
+          (s) => s.awaitingOrders.map((o) => '${o['_id']}').join(','),
+        ),
+        (_, next) => ref
+            .read(pharmacyOrderBannerProvider.notifier)
+            .retainOnly(next.isEmpty ? const {} : next.split(',').toSet()),
+      );
+      ref.listen<int?>(pharmacyTabRequestProvider, (_, next) {
+        if (next == null) return;
+        _selectTab(next);
+        ref.read(pharmacyTabRequestProvider.notifier).state = null;
+      });
     }
+    // Doctors and physios share the appointments data layer (the server
+    // scopes /appointment by role), so they boot and alert the same way.
+    if (role == UserRole.doctor || role == UserRole.physiotherapist) {
+      if (!_doctorBooted) {
+        _doctorBooted = true;
+        ProfessionalNotificationNavigationService.appointmentScreen =
+            _appointmentScreen;
+        Future.microtask(
+          () =>
+              ref.read(doctorAppointmentsProvider.notifier).startLiveUpdates(),
+        );
+      }
+      ref.listen<int>(doctorAppointmentsProvider.select((s) => s.arrivalTick), (
+        previous,
+        next,
+      ) {
+        if (previous != null && next > previous) _announceNewRequest();
+      });
+      // Nothing left to answer: stop ringing. A request accepted, declined,
+      // cancelled or expired leaves the banner.
+      ref.listen<String>(
+        doctorAppointmentsProvider.select(
+          (s) => s.requests.map((a) => '${a['_id']}').join(','),
+        ),
+        (_, next) {
+          if (next.isEmpty) _acknowledgeOrders();
+          ref
+              .read(pharmacyOrderBannerProvider.notifier)
+              .retainOnly(next.isEmpty ? const {} : next.split(',').toSet());
+        },
+      );
+      ref.listen<int?>(pharmacyTabRequestProvider, (_, next) {
+        if (next == null) return;
+        _selectTab(next);
+        ref.read(pharmacyTabRequestProvider.notifier).state = null;
+      });
+    }
+    if (role == UserRole.pathology) {
+      if (!_labBooted) {
+        _labBooted = true;
+        ProfessionalNotificationNavigationService.labOrderScreen = (id) =>
+            PathologyOrderDetail(orderId: id);
+        Future.microtask(() {
+          ref.read(labOrdersProvider.notifier).startLiveUpdates();
+          ref.read(labDashboardProvider.notifier).load();
+        });
+      }
+      ref.listen<int>(labOrdersProvider.select((s) => s.arrivalTick), (
+        previous,
+        next,
+      ) {
+        if (previous != null && next > previous) _announceLabBooking();
+      });
+      // A booking leaves the banner once its sample is collected (or it's
+      // cancelled) — the lab has clearly dealt with it.
+      ref.listen<String>(
+        labOrdersProvider.select(
+          (s) => s
+              .inStage(lab.LabStage.collect)
+              .map((o) => '${o['_id']}')
+              .join(','),
+        ),
+        (_, next) => ref
+            .read(pharmacyOrderBannerProvider.notifier)
+            .retainOnly(next.isEmpty ? const {} : next.split(',').toSet()),
+      );
+      ref.listen<int?>(pharmacyTabRequestProvider, (_, next) {
+        if (next == null) return;
+        _selectTab(next);
+        ref.read(pharmacyTabRequestProvider.notifier).state = null;
+      });
+    }
+    // Modules on the minimal kit: pill nav, faded tabs, clamped scrolling,
+    // bell and verification notice inside their own Home.
+    final minimal =
+        role == UserRole.pharmacy ||
+        role == UserRole.doctor ||
+        role == UserRole.physiotherapist ||
+        role == UserRole.pathology;
+    final labWaiting = role == UserRole.pathology
+        ? ref.watch(
+            labOrdersProvider.select(
+              (s) =>
+                  s.inStage(lab.LabStage.collect).length +
+                  s.inStage(lab.LabStage.reports).length,
+            ),
+          )
+        : 0;
+    final doctorRequests =
+        role == UserRole.doctor || role == UserRole.physiotherapist
+        ? ref.watch(doctorAppointmentsProvider.select((s) => s.requests.length))
+        : 0;
+    final awaitingOrders = role == UserRole.pharmacy
+        ? ref.watch(
+            pharmacyOrdersProvider.select((s) => s.awaitingOrders.length),
+          )
+        : 0;
 
     // Pharmacy renders this notice inside its Home screen instead, below the
     // hero and above the actions group, where it sits in that page's own
@@ -343,7 +624,7 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
     final showBanner =
         authState.user?.verificationStatus != VerificationStatus.approved &&
         !_bannerDismissed &&
-        role != UserRole.pharmacy;
+        !minimal;
 
     return Scaffold(
       body: Column(
@@ -366,66 +647,198 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
           Expanded(
             child: Stack(
               children: [
-                IndexedStack(index: _currentIndex, children: pages),
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  // The banner (when shown) already consumes the status-bar
-                  // safe area above this Stack, so only apply it here when
-                  // there's no banner and this Stack starts at the very top.
-                  child: SafeArea(
-                    bottom: false,
-                    top: !showBanner,
-                    // The bell takes the role accent so it belongs to the
-                    // module it floats over.
-                    child: NotificationBell(color: roleColor),
-                  ),
+                IndexedStack(
+                  index: _currentIndex,
+                  children: [
+                    for (var i = 0; i < pages.length; i++)
+                      // The tab coming into view fades up instead of
+                      // snapping; IndexedStack keeps each tab's state.
+                      minimal
+                          ? AnimatedOpacity(
+                              opacity: i == _currentIndex ? 1 : 0,
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOut,
+                              child: PharmacyScrollScope(child: pages[i]),
+                            )
+                          : pages[i],
+                  ],
                 ),
+                // Pharmacy carries its bell inside Home's pinned header
+                // instead of floating it over the tabs.
+                if (!minimal)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    // The banner (when shown) already consumes the status-bar
+                    // safe area above this Stack, so only apply it here when
+                    // there's no banner and this Stack starts at the very top.
+                    child: SafeArea(
+                      bottom: false,
+                      top: !showBanner,
+                      // The bell takes the role accent so it belongs to the
+                      // module it floats over.
+                      child: NotificationBell(color: roleColor),
+                    ),
+                  ),
               ],
             ),
           ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 20,
-              offset: const Offset(0, -4),
-            ),
-          ]
-        ),
-        child: SafeArea(
-          child: Padding(
-            // Pharmacy carries six items; the side padding that suits five
-            // squeezes their labels, so it is dropped for that role only.
-            padding: EdgeInsets.symmetric(
-              horizontal: navItems.length > 5 ? 0 : 8,
-              vertical: 4,
-            ),
-            child: BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: (i) => setState(() => _currentIndex = i),
-              items: navItems,
-              selectedItemColor: roleColor,
-              unselectedItemColor: AppTheme.textTertiary,
-              selectedLabelStyle: GoogleFonts.manrope(
-                fontSize: navItems.length > 5 ? 10 : 11,
-                fontWeight: FontWeight.w600,
+      bottomNavigationBar:
+          role == UserRole.doctor || role == UserRole.physiotherapist
+          ? PharmacyBottomBarReporter(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: ApiService.reachable,
+                    builder: (_, online, _) => AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      child: online
+                          ? const SizedBox(width: double.infinity)
+                          : PharmacyOfflineBanner(
+                              onRetry: () => ref
+                                  .read(doctorAppointmentsProvider.notifier)
+                                  .load(silent: true),
+                            ),
+                    ),
+                  ),
+                  PharmacyNavBar(
+                    currentIndex: _currentIndex,
+                    onTap: _selectTab,
+                    items: [
+                      const PharmacyNavItem(LucideIcons.house, 'Today'),
+                      PharmacyNavItem(
+                        LucideIcons.calendarDays,
+                        role == UserRole.physiotherapist
+                            ? 'Sessions'
+                            : 'Appointments',
+                        badge: doctorRequests,
+                      ),
+                      const PharmacyNavItem(LucideIcons.users, 'Patients'),
+                      const PharmacyNavItem(LucideIcons.wallet, 'Earnings'),
+                      const PharmacyNavItem(
+                        LucideIcons.circleUserRound,
+                        'Profile',
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              unselectedLabelStyle: GoogleFonts.manrope(
-                fontSize: navItems.length > 5 ? 10 : 11,
-                fontWeight: FontWeight.w500,
+            )
+          : role == UserRole.pathology
+          ? PharmacyBottomBarReporter(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: ApiService.reachable,
+                    builder: (_, online, _) => AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      child: online
+                          ? const SizedBox(width: double.infinity)
+                          : PharmacyOfflineBanner(
+                              onRetry: () => ref
+                                  .read(labOrdersProvider.notifier)
+                                  .load(silent: true),
+                            ),
+                    ),
+                  ),
+                  PharmacyNavBar(
+                    currentIndex: _currentIndex,
+                    onTap: _selectTab,
+                    items: [
+                      const PharmacyNavItem(LucideIcons.house, 'Today'),
+                      PharmacyNavItem(
+                        LucideIcons.clipboardList,
+                        'Orders',
+                        badge: labWaiting,
+                      ),
+                      const PharmacyNavItem(LucideIcons.flaskConical, 'Tests'),
+                      const PharmacyNavItem(LucideIcons.wallet, 'Earnings'),
+                      const PharmacyNavItem(
+                        LucideIcons.circleUserRound,
+                        'Profile',
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: Colors.transparent,
-              elevation: 0,
+            )
+          : role == UserRole.pharmacy
+          ? PharmacyBottomBarReporter(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Above the nav bar rather than at the top: pages own their
+                  // safe-area insets, and a top strip would double them.
+                  ValueListenableBuilder<bool>(
+                    valueListenable: ApiService.reachable,
+                    builder: (_, online, _) => AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      child: online
+                          ? const SizedBox(width: double.infinity)
+                          : PharmacyOfflineBanner(
+                              onRetry: () {
+                                ref
+                                    .read(pharmacyOrdersProvider.notifier)
+                                    .pollNow();
+                                ref
+                                    .read(pharmacyStoreProvider.notifier)
+                                    .refresh();
+                              },
+                            ),
+                    ),
+                  ),
+                  PharmacyNavBar(
+                    currentIndex: _currentIndex,
+                    awaitingOrders: awaitingOrders,
+                    onTap: _selectTab,
+                  ),
+                ],
+              ),
+            )
+          : Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Padding(
+                  // Pharmacy carries six items; the side padding that suits five
+                  // squeezes their labels, so it is dropped for that role only.
+                  padding: EdgeInsets.symmetric(
+                    horizontal: navItems.length > 5 ? 0 : 8,
+                    vertical: 4,
+                  ),
+                  child: BottomNavigationBar(
+                    currentIndex: _currentIndex,
+                    onTap: (i) => setState(() => _currentIndex = i),
+                    items: navItems,
+                    selectedItemColor: roleColor,
+                    unselectedItemColor: AppTheme.textTertiary,
+                    selectedLabelStyle: GoogleFonts.manrope(
+                      fontSize: navItems.length > 5 ? 10 : 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    unselectedLabelStyle: GoogleFonts.manrope(
+                      fontSize: navItems.length > 5 ? 10 : 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    type: BottomNavigationBarType.fixed,
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

@@ -1,624 +1,991 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/network/api_service.dart';
+import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../../shared/ui/app_ui.dart';
+import '../providers/doctor_prescriptions_provider.dart';
+import '../widgets/doctor_ui.dart';
+import '../widgets/prescription_appointment_sheet.dart';
+import '../widgets/prescription_medicine_row.dart';
+import '../widgets/prescription_ui.dart';
 import 'prescription_details.dart';
 
+// ═════════════════════════════════ List ═════════════════════════════════
+
+/// Every prescription this doctor has written: drafts to finish, issued ones
+/// to share, cancelled ones for the record.
 class DoctorPrescriptions extends ConsumerStatefulWidget {
   const DoctorPrescriptions({super.key});
 
   @override
-  ConsumerState<DoctorPrescriptions> createState() => _DoctorPrescriptionsState();
+  ConsumerState<DoctorPrescriptions> createState() =>
+      _DoctorPrescriptionsState();
 }
 
-class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> with SingleTickerProviderStateMixin {
-  final ApiService _api = ApiService();
-  late TabController _tabController;
-  List<Map<String, dynamic>> _prescriptions = [];
-  bool _loading = true;
+class _DoctorPrescriptionsState extends ConsumerState<DoctorPrescriptions> {
+  static const _filters = [
+    ('all', 'All'),
+    ('draft', 'Drafts'),
+    ('issued', 'Issued'),
+    ('cancelled', 'Cancelled'),
+  ];
+
+  final _search = TextEditingController();
+  Timer? _debounce;
+
+  String _filter = 'all';
+  String _query = '';
+
+  DoctorPrescriptionsNotifier get _rx =>
+      ref.read(doctorPrescriptionsProvider.notifier);
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadPrescriptions();
+    // Already in memory: show it and re-read quietly.
+    Future.microtask(() {
+      if (!mounted) return;
+      final s = ref.read(doctorPrescriptionsProvider);
+      if (s.hasLoaded) {
+        _rx.load(silent: true);
+      } else {
+        _rx.load();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _debounce?.cancel();
+    _search.dispose();
     super.dispose();
   }
 
-  Future<void> _loadPrescriptions() async {
-    setState(() => _loading = true);
-    try {
-      final res = await _api.getPrescriptions(queryParams: {'limit': 100});
-      final data = res.data;
-      final list = data is Map ? (data['data'] ?? data['prescriptions'] ?? []) : data;
-      if (list is List) {
-        _prescriptions = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      }
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+  void _onSearch(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() => _query = v.trim().toLowerCase());
+    });
   }
 
-  void _openCreatePrescription() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CreatePrescriptionScreen()));
-  }
+  int _count(List<Map<String, dynamic>> all, String f) =>
+      f == 'all' ? all.length : all.where((r) => rxStatus(r) == f).length;
+
+  List<Map<String, dynamic>> _visible(List<Map<String, dynamic>> all) =>
+      all.where((rx) {
+        if (_filter != 'all' && rxStatus(rx) != _filter) return false;
+        if (_query.isEmpty) return true;
+        return rxPatientName(rx).toLowerCase().contains(_query) ||
+            '${rx['prescriptionNumber'] ?? ''}'.toLowerCase().contains(_query);
+      }).toList();
+
+  // Saves, issues and cancels land in the provider, so the list is current
+  // when these return without a reload.
+  Future<void> _create() => Navigator.of(
+    context,
+  ).push<bool>(AppPageRoute(builder: (_) => const CreatePrescriptionScreen()));
+
+  Future<void> _open(Map<String, dynamic> rx) => Navigator.of(context).push(
+    AppPageRoute(builder: (_) => PrescriptionDetailsScreen(prescription: rx)),
+  );
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(doctorPrescriptionsProvider);
+    final all = state.items;
+    final error = state.error;
+    final loading = !state.hasLoaded && error == null;
+    final visible = _visible(all);
     return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        title: Text('Prescriptions', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: GoogleFonts.manrope(fontSize: 14),
-          labelColor: AppTheme.primary, unselectedLabelColor: AppTheme.textTertiary,
-          indicatorColor: AppTheme.primary, indicatorWeight: 3,
-          tabs: const [Tab(text: 'All Prescriptions'), Tab(text: 'Write New')],
+      backgroundColor: AppColors.bg,
+      appBar: rxAppBar(context, title: 'Prescriptions'),
+      floatingActionButton: AppFab(
+        label: 'New prescription',
+        icon: LucideIcons.plus,
+        onPressed: _create,
+      ),
+      body: RefreshIndicator(
+        color: ModuleAccent.of(context).color,
+        onRefresh: () => _rx.load(silent: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
+          children: [
+            AppSearchField(
+              controller: _search,
+              hint: 'Search patient or Rx number',
+              onChanged: _onSearch,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _filters.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 6),
+                itemBuilder: (_, i) {
+                  final (key, label) = _filters[i];
+                  final n = _count(all, key);
+                  return AppFilterChip(
+                    label: loading || n == 0 ? label : '$label  $n',
+                    selected: _filter == key,
+                    onTap: () => setState(() => _filter = key),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (error != null)
+              AppErrorBanner(message: error, onRetry: () => _rx.load()),
+            if (loading)
+              const AppListSkeleton(count: 5)
+            else if (visible.isEmpty && error == null)
+              AppEmptyState(
+                icon: LucideIcons.fileText,
+                text: all.isEmpty
+                    ? 'No prescriptions yet.\nWrite one after a consultation, or tap New prescription.'
+                    : _query.isNotEmpty
+                    ? 'No prescriptions match “${_search.text.trim()}”.'
+                    : 'Nothing in ${_filters.firstWhere((f) => f.$1 == _filter).$2.toLowerCase()}.',
+              )
+            else
+              for (final (i, rx) in visible.indexed)
+                Padding(
+                  key: ValueKey(rxId(rx)),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: AppEntrance(
+                    index: i,
+                    child: _RxRow(rx: rx, onTap: () => _open(rx)),
+                  ),
+                ),
+          ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // Tab 1: List
-          _loading
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-              : RefreshIndicator(
-                  onRefresh: _loadPrescriptions,
-                  child: _prescriptions.isEmpty
-                      ? ListView(children: [
-                          const SizedBox(height: 80),
-                          Center(child: Column(children: [
-                            Icon(CupertinoIcons.doc_text, size: 56, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
-                            const SizedBox(height: 16),
-                            Text('No prescriptions yet', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
-                            const SizedBox(height: 8),
-                            Text('Write a new prescription to get started', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textTertiary)),
-                          ])),
-                        ])
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _prescriptions.length,
-                          itemBuilder: (_, i) => _prescriptionCard(_prescriptions[i]),
-                        ),
-                ),
-          // Tab 2: Create
-          const CreatePrescriptionScreen(embedded: true),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openCreatePrescription,
-        backgroundColor: AppTheme.primary,
-        icon: const Icon(CupertinoIcons.doc_text, color: Colors.white),
-        label: Text('New', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, color: Colors.white)),
-      ),
     );
-  }
-
-  Widget _prescriptionCard(Map<String, dynamic> rx) {
-    final patient = rx['patientId'];
-    final patientName = patient is Map ? (patient['name'] ?? 'Patient') : 'Patient';
-    final diagnosisRaw = rx['diagnosis'];
-    String diagnosis = 'N/A';
-    if (diagnosisRaw is List) {
-      diagnosis = diagnosisRaw.join(', ');
-    } else if (diagnosisRaw != null) {
-      diagnosis = diagnosisRaw.toString();
-    }
-    final meds = rx['medicines'] ?? rx['medications'] ?? [];
-    final date = rx['createdAt'] ?? rx['date'] ?? '';
-    final formattedDate = _formatDate(date);
-
-    return GestureDetector(
-      onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PrescriptionDetailsScreen(prescription: rx),
-        ));
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(10)),
-              child: Center(child: Text(patientName[0], style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(patientName, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-              Text(diagnosis, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
-            ])),
-            Text(formattedDate, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
-          ]),
-          if (meds is List && meds.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6, runSpacing: 6,
-              children: meds.take(3).map((m) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(8)),
-                child: Text(m is Map ? (m['medicineName'] ?? m['name'] ?? m['medicine'] ?? '') : m.toString(),
-                  style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w500, color: AppTheme.primary)),
-              )).toList(),
-            ),
-            if (meds.length > 3)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('+${meds.length - 3} more', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
-              ),
-          ],
-        ]),
-      ),
-    );
-  }
-
-  String _formatDate(dynamic date) {
-    if (date is String && date.isNotEmpty) {
-      try {
-        final dt = DateTime.parse(date);
-        return '${dt.day}/${dt.month}/${dt.year}';
-      } catch (_) {}
-    }
-    return '';
   }
 }
 
+class _RxRow extends StatelessWidget {
+  final Map<String, dynamic> rx;
+  final VoidCallback onTap;
+  const _RxRow({required this.rx, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final status = rxStatus(rx);
+    final name = rxPatientName(rx);
+    final diagnosis = rxStrings(rx['diagnosis']);
+    final meds = rxMaps(rx['medicines']).length;
+    final muted = status == 'cancelled' || status == 'superseded';
+    final summary = [
+      if (diagnosis.isNotEmpty)
+        diagnosis.length > 1
+            ? '${diagnosis.first} +${diagnosis.length - 1}'
+            : diagnosis.first
+      else
+        'No diagnosis yet',
+      meds == 0 ? 'No medicines' : '$meds medicine${meds == 1 ? '' : 's'}',
+    ].join(' · ');
+
+    return AppPressable(
+      scale: 0.985,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DoctorAvatar(name: name, size: 40),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppType.sans(
+                            fontSize: AppType.title,
+                            fontWeight: FontWeight.w700,
+                            color: muted
+                                ? AppColors.textSecondary
+                                : AppColors.textStrong,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      RxStatusTag(status),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${rxNumber(rx)} · ${dayLabel(rxWhen(rx))}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.sans(
+                      fontSize: AppType.caption,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.sans(
+                      fontSize: AppType.small,
+                      color: diagnosis.isEmpty
+                          ? AppColors.textTertiary
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════ Editor ════════════════════════════════
+
+/// Writes a new prescription, or edits a draft ([prescription]).
+///
+/// Opened from an appointment or consultation with the `initial*` ids, the
+/// patient is fixed; opened from the list, the doctor picks the appointment.
+/// Pops `true` once saved.
 class CreatePrescriptionScreen extends ConsumerStatefulWidget {
+  /// Legacy: once shown inside a tab. When true the screen resets after a
+  /// save instead of closing.
   final bool embedded;
   final String? initialPatientId;
   final String? initialPatientName;
   final String? initialAppointmentId;
+
+  /// An existing draft (or issued prescription, to revise) to edit.
+  final Map<String, dynamic>? prescription;
 
   const CreatePrescriptionScreen({
     this.embedded = false,
     this.initialPatientId,
     this.initialPatientName,
     this.initialAppointmentId,
+    this.prescription,
     super.key,
   });
 
   @override
-  ConsumerState<CreatePrescriptionScreen> createState() => _CreatePrescriptionScreenState();
+  ConsumerState<CreatePrescriptionScreen> createState() =>
+      _CreatePrescriptionScreenState();
 }
 
-class _CreatePrescriptionScreenState extends ConsumerState<CreatePrescriptionScreen> {
-  final ApiService _api = ApiService();
-  final _diagnosisController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _patientSearchController = TextEditingController();
-
-  String? _selectedPatientId;
-  String? _selectedAppointmentId;
-  String _selectedPatientName = '';
-  bool _saving = false;
-  bool _searching = false;
-  List<Map<String, dynamic>> _searchResults = [];
-
-  final List<Map<String, String>> _medicines = [
-    {'medicineName': '', 'dosage': '', 'duration': '', 'frequency': '', 'instructions': ''},
+class _CreatePrescriptionScreenState
+    extends ConsumerState<CreatePrescriptionScreen> {
+  static const _testSuggestions = [
+    'CBC',
+    'Blood sugar (fasting)',
+    'HbA1c',
+    'Lipid profile',
+    'Thyroid profile',
+    'Urine routine',
   ];
+
+  final _scroll = ScrollController();
+  final _patientKey = GlobalKey();
+  final _diagnosisKey = GlobalKey();
+  final _medicinesKey = GlobalKey();
+
+  final _advice = TextEditingController();
+  final _notes = TextEditingController();
+  final _followUpNote = TextEditingController();
+
+  // Patient / appointment
+  String? _appointmentId;
+  String _patientName = '';
+  String _patientMeta = '';
+  String _visitLine = '';
+  List<String> _apptSymptoms = const [];
+
+  /// The prescription this editor saves into, once there is one: the draft
+  /// being edited, the draft created by an earlier attempt, or the issued
+  /// one being revised.
+  Map<String, dynamic>? _current;
+
+  List<String> _diagnosis = [];
+  List<String> _symptoms = [];
+  List<String> _tests = [];
+  Map<String, Map<String, dynamic>> _testSource = {};
+  List<Map<String, dynamic>> _adviceSource = [];
+  final List<RxMedicineDraft> _meds = [];
+  DateTime? _followUp;
+
+  bool _checking = false;
+  String? _saving; // 'draft' | 'issue'
+  String? _error;
+  bool _tried = false;
+  bool _issueTried = false;
+  bool _lastIssue = false;
+
+  DoctorPrescriptionsNotifier get _rx =>
+      ref.read(doctorPrescriptionsProvider.notifier);
+
+  bool get _locked =>
+      widget.prescription != null || widget.initialAppointmentId != null;
 
   @override
   void initState() {
     super.initState();
-    _selectedPatientId = widget.initialPatientId;
-    _selectedPatientName = widget.initialPatientName ?? '';
-    _selectedAppointmentId = widget.initialAppointmentId;
+    final rx = widget.prescription;
+    if (rx != null) {
+      _fill(rx);
+      final appt = rxMap(rx['appointmentId']);
+      _appointmentId = appt.isNotEmpty
+          ? '${appt['_id']}'
+          : '${rx['appointmentId'] ?? ''}';
+      _patientName = rxPatientName(rx);
+      _patientMeta = rxPatientMeta(rxPatient(rx));
+      if (appt.isNotEmpty) _visitLine = _visit(appt);
+    } else {
+      _appointmentId = widget.initialAppointmentId;
+      _patientName = (widget.initialPatientName ?? '').trim();
+      if (_appointmentId != null && _appointmentId!.isNotEmpty) {
+        _checking = true;
+        _checkExisting(_appointmentId!);
+      }
+    }
+    if (_meds.isEmpty) _addMedicine(rebuild: false);
   }
 
   @override
   void dispose() {
-    _diagnosisController.dispose();
-    _notesController.dispose();
-    _patientSearchController.dispose();
+    _scroll.dispose();
+    _advice.dispose();
+    _notes.dispose();
+    _followUpNote.dispose();
+    for (final m in _meds) {
+      m.dispose();
+    }
     super.dispose();
   }
 
-  List<Map<String, dynamic>> _extractList(dynamic data) {
-    if (data is List) {
-      return data.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  // ─────────────────────────── Data ───────────────────────────
+
+  static String _visit(Map<String, dynamic> appt) {
+    final start = apptStart(appt);
+    return [
+      if (start != null) '${dayLabel(start)}, ${timeLabel(start)}',
+      apptTypeInfo(apptType(appt)).label,
+    ].join(' · ');
+  }
+
+  /// Loads a saved prescription's contents into the form.
+  void _fill(Map<String, dynamic> rx) {
+    _current = rx;
+    _diagnosis = rxStrings(rx['diagnosis']);
+    _symptoms = rxStrings(rx['symptoms']);
+    final tests = rxMaps(rx['labTests']);
+    _tests = [
+      for (final t in tests)
+        if ('${t['testName'] ?? ''}'.trim().isNotEmpty)
+          '${t['testName']}'.trim(),
+    ];
+    _testSource = {
+      for (final t in tests) '${t['testName'] ?? ''}'.trim().toLowerCase(): t,
+    };
+    _adviceSource = rxMaps(rx['advice']);
+    _advice.text = _adviceSource
+        .map((a) => '${a['advice'] ?? ''}'.trim())
+        .where((a) => a.isNotEmpty)
+        .join('\n');
+    _notes.text = '${rx['notes'] ?? ''}'.trim();
+    _followUp = rxDate(rx['followUpDate']);
+    _followUpNote.text = '${rx['followUpInstructions'] ?? ''}'.trim();
+    for (final m in _meds) {
+      m.dispose();
     }
-    if (data is Map) {
-      for (final key in ['appointments', 'data', 'results']) {
-        final value = data[key];
-        if (value is List) {
-          return value.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    _meds.clear();
+    for (final m in rxMaps(rx['medicines'])) {
+      _meds.add(_watch(RxMedicineDraft(m)));
+    }
+    final p = rxPatient(rx);
+    if (p.isNotEmpty) {
+      _patientName = rxPatientName(rx);
+      _patientMeta = rxPatientMeta(p);
+    }
+  }
+
+  bool get _formEmpty =>
+      _diagnosis.isEmpty &&
+      _symptoms.isEmpty &&
+      _tests.isEmpty &&
+      _advice.text.trim().isEmpty &&
+      _notes.text.trim().isEmpty &&
+      _meds.every((m) => m.isBlank);
+
+  /// An appointment can have only one current (draft or issued)
+  /// prescription. Find it so saving continues it instead of hitting 409.
+  Future<void> _checkExisting(String appointmentId) async {
+    try {
+      final rx = await _rx.forAppointment(appointmentId);
+      if (!mounted || appointmentId != _appointmentId) return;
+      setState(() {
+        if (rx != null && {'draft', 'issued'}.contains(rxStatus(rx))) {
+          if (_formEmpty) {
+            _fill(rx);
+            if (_meds.isEmpty) _addMedicine(rebuild: false);
+          } else {
+            _current = rx;
+          }
         }
-      }
-    }
-    return [];
-  }
-
-  Future<void> _searchAppointments(String query) async {
-    if (query.trim().length < 2) {
-      setState(() => _searchResults = []);
-      return;
-    }
-    setState(() => _searching = true);
-    try {
-      final response = await _api.getAppointments(
-        queryParams: {
-          'status': 'confirmed,accepted,in_progress,completed',
-          'limit': 100,
-          'sort': 'appointmentDate:desc',
-        },
-      );
-      final q = query.trim().toLowerCase();
-      final results = <Map<String, dynamic>>[];
-      for (final appointment in _extractList(response.data)) {
-        final patient = appointment['patientId'];
-        if (patient is! Map || patient['_id'] == null) continue;
-        final name = (patient['name'] ?? '').toString();
-        final phone = (patient['phone'] ?? '').toString();
-        if (!name.toLowerCase().contains(q) && !phone.toLowerCase().contains(q)) continue;
-        results.add({
-          'appointmentId': appointment['_id']?.toString(),
-          'appointmentDate': appointment['appointmentDate'],
-          'startTime': appointment['startTime'],
-          'status': appointment['status'],
-          'patient': Map<String, dynamic>.from(patient),
-        });
-      }
-      if (mounted) setState(() => _searchResults = results);
-    } catch (error) {
-      if (mounted) _showSnack(_messageFromError(error));
-    } finally {
-      if (mounted) setState(() => _searching = false);
-    }
-  }
-
-  void _selectAppointment(Map<String, dynamic> result) {
-    final patient = Map<String, dynamic>.from(result['patient'] as Map);
-    setState(() {
-      _selectedPatientId = patient['_id']?.toString();
-      _selectedPatientName = (patient['name'] ?? 'Patient').toString();
-      _selectedAppointmentId = result['appointmentId']?.toString();
-      _searchResults = [];
-      _patientSearchController.clear();
-    });
-  }
-
-  void _clearAppointment() {
-    setState(() {
-      _selectedPatientId = null;
-      _selectedPatientName = '';
-      _selectedAppointmentId = null;
-    });
-  }
-
-  void _addMedicine() {
-    setState(() => _medicines.add({
-      'medicineName': '',
-      'dosage': '',
-      'duration': '',
-      'frequency': '',
-      'instructions': '',
-    }));
-  }
-
-  void _removeMedicine(int index) {
-    setState(() {
-      if (_medicines.length == 1) {
-        _medicines[0] = {
-          'medicineName': '',
-          'dosage': '',
-          'duration': '',
-          'frequency': '',
-          'instructions': '',
-        };
-      } else {
-        _medicines.removeAt(index);
-      }
-    });
-  }
-
-  Future<void> _savePrescription({required bool issue}) async {
-    if (_selectedAppointmentId == null || _selectedAppointmentId!.isEmpty) {
-      _showSnack('Select an appointment before writing a prescription.');
-      return;
-    }
-    final diagnosis = _diagnosisController.text.trim();
-    if (diagnosis.isEmpty) {
-      _showSnack('Please enter at least one diagnosis.');
-      return;
-    }
-
-    final validMeds = _medicines
-        .where((m) => (m['medicineName'] ?? '').trim().isNotEmpty)
-        .map((m) => Map<String, dynamic>.from(m))
-        .toList();
-
-    setState(() => _saving = true);
-    try {
-      final create = await _api.createPrescription({
-        'appointmentId': _selectedAppointmentId,
-        'diagnosis': diagnosis.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
-        if (_notesController.text.trim().isNotEmpty)
-          'advice': [
-            {'advice': _notesController.text.trim()},
-          ],
-        'medicines': validMeds,
-        'saveAsDraft': true,
+        _checking = false;
       });
-      final body = create.data;
-      final rx = body is Map ? body['prescription'] : null;
-      final id = rx is Map ? rx['_id']?.toString() : null;
-      if (id == null || id.isEmpty) throw Exception('Prescription was created without an ID');
-
-      if (issue) {
-        await _api.issuePrescription(id);
-      }
-
+    } catch (e) {
+      // 404 just means there's nothing yet.
       if (!mounted) return;
-      _showSnack(issue ? 'Prescription issued to the patient.' : 'Prescription draft saved.', isError: false);
-      if (!widget.embedded) {
-        Navigator.of(context).pop(true);
-      } else {
-        _resetForm();
-      }
-    } catch (error) {
-      _showSnack(_messageFromError(error));
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      setState(() => _checking = false);
+    }
+    // The patient's details come with the appointment.
+    _loadAppointment(appointmentId);
+  }
+
+  Future<void> _loadAppointment(String id) async {
+    if (_visitLine.isNotEmpty && _patientMeta.isNotEmpty) return;
+    try {
+      final appt = await _rx.appointment(id);
+      if (!mounted || appt == null || id != _appointmentId) return;
+      setState(() => _useAppointment(appt));
+    } catch (_) {
+      // Name from the caller is enough to write against.
     }
   }
 
-  void _resetForm() {
-    _diagnosisController.clear();
-    _notesController.clear();
-    _patientSearchController.clear();
+  void _useAppointment(Map<String, dynamic> appt) {
+    final p = apptPatient(appt);
+    if (p.isNotEmpty) {
+      _patientName = patientName(appt);
+      _patientMeta = rxPatientMeta(p);
+    }
+    _visitLine = _visit(appt);
+    _apptSymptoms = rxStrings(appt['symptoms']);
+  }
+
+  Future<void> _pickAppointment() async {
+    final appt = await showRxAppointmentPicker(context);
+    if (appt == null || !mounted) return;
+    final id = '${appt['_id']}';
     setState(() {
-      _selectedPatientId = null;
-      _selectedPatientName = '';
-      _selectedAppointmentId = null;
-      _searchResults = [];
-      _medicines
-        ..clear()
-        ..add({
-          'medicineName': '',
-          'dosage': '',
-          'duration': '',
-          'frequency': '',
-          'instructions': '',
-        });
+      _appointmentId = id;
+      _current = null;
+      _useAppointment(appt);
+      _checking = true;
+      _error = null;
+    });
+    _checkExisting(id);
+  }
+
+  RxMedicineDraft _watch(RxMedicineDraft d) {
+    d.name.addListener(() {
+      if (d.nameError != null && d.name.text.trim().isNotEmpty && mounted) {
+        setState(() => d.nameError = null);
+      }
+    });
+    return d;
+  }
+
+  void _addMedicine({bool rebuild = true}) {
+    final d = _watch(RxMedicineDraft());
+    if (rebuild) {
+      setState(() => _meds.add(d));
+    } else {
+      _meds.add(d);
+    }
+  }
+
+  void _removeMedicine(RxMedicineDraft d) {
+    setState(() => _meds.remove(d));
+    // Dispose after the row has left the tree.
+    WidgetsBinding.instance.addPostFrameCallback((_) => d.dispose());
+  }
+
+  // ─────────────────────────── Save ───────────────────────────
+
+  String? get _patientError => _tried && (_appointmentId ?? '').isEmpty
+      ? 'Choose the appointment this prescription is for.'
+      : null;
+
+  String? get _diagnosisError => _issueTried && _diagnosis.isEmpty
+      ? 'Add at least one diagnosis to issue.'
+      : null;
+
+  bool _validate({required bool issue}) {
+    _tried = true;
+    _issueTried = issue;
+    var firstKey = (_appointmentId ?? '').isEmpty ? _patientKey : null;
+    if (issue && _diagnosis.isEmpty) firstKey ??= _diagnosisKey;
+    for (final m in _meds) {
+      m.nameError = !m.isBlank && m.name.text.trim().isEmpty
+          ? 'Enter the medicine name.'
+          : null;
+      if (m.nameError != null) firstKey ??= _medicinesKey;
+    }
+    setState(() {});
+    if (firstKey?.currentContext != null) {
+      Scrollable.ensureVisible(
+        firstKey!.currentContext!,
+        duration: AppMotion.medium,
+        curve: AppMotion.enter,
+        alignment: 0.05,
+      );
+    }
+    return firstKey == null;
+  }
+
+  Map<String, dynamic> _payload() {
+    final adviceLines = _advice.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return {
+      'diagnosis': _diagnosis,
+      'symptoms': _symptoms,
+      'notes': _notes.text.trim(),
+      'medicines': [
+        for (final m in _meds)
+          if (!m.isBlank) m.toJson(),
+      ],
+      'labTests': [
+        for (final t in _tests)
+          {...?_testSource[t.toLowerCase()], 'testName': t},
+      ],
+      'advice': [
+        for (final (i, line) in adviceLines.indexed)
+          {if (i < _adviceSource.length) ..._adviceSource[i], 'advice': line},
+      ],
+      'followUpDate': _followUp == null
+          ? null
+          : DateTime(
+              _followUp!.year,
+              _followUp!.month,
+              _followUp!.day,
+              12,
+            ).toIso8601String(),
+      'followUpInstructions': _followUpNote.text.trim(),
+    };
+  }
+
+  Future<void> _save({required bool issue}) async {
+    if (_saving != null) return;
+    FocusScope.of(context).unfocus();
+    if (!_validate(issue: issue)) return;
+    setState(() {
+      _saving = issue ? 'issue' : 'draft';
+      _lastIssue = issue;
+      _error = null;
+    });
+    final payload = _payload();
+    try {
+      // Kept before issuing so a retry issues the draft already created.
+      final rx = _current = await _rx.saveDraft(
+        payload,
+        appointmentId: _appointmentId,
+        current: _current,
+      );
+      if (issue) _current = await _rx.issue(rxId(rx));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.textStrong,
+          content: Text(
+            issue
+                ? 'Prescription issued. The patient has been notified.'
+                : 'Draft saved.',
+            style: AppType.sans(fontSize: AppType.caption, color: Colors.white),
+          ),
+        ),
+      );
+      if (widget.embedded) {
+        _reset();
+      } else {
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _error = doctorError(
+          e,
+          fallback: issue
+              ? 'Couldn’t issue the prescription.'
+              : 'Couldn’t save the draft.',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = null);
+    }
+  }
+
+  void _reset() {
+    setState(() {
+      _current = null;
+      if (widget.initialAppointmentId == null) {
+        _appointmentId = null;
+        _patientName = '';
+        _patientMeta = '';
+        _visitLine = '';
+      }
+      _diagnosis = [];
+      _symptoms = [];
+      _tests = [];
+      _advice.clear();
+      _notes.clear();
+      _followUp = null;
+      _followUpNote.clear();
+      for (final m in _meds) {
+        m.dispose();
+      }
+      _meds.clear();
+      _addMedicine(rebuild: false);
+      _tried = false;
+      _issueTried = false;
     });
   }
 
-  String _messageFromError(Object error) {
-    final text = error.toString();
-    return text.replaceFirst('Exception: ', '').replaceFirst('DioException [bad response]: ', '');
-  }
-
-  void _showSnack(String message, {bool isError = true}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? AppTheme.error : AppTheme.success,
-        behavior: SnackBarBehavior.floating,
-      ),
+  Future<void> _pickFollowUp() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _followUp ?? now.add(const Duration(days: 7)),
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 365)),
     );
+    if (picked != null && mounted) setState(() => _followUp = picked);
   }
 
-  String _dateLabel(dynamic value) {
-    if (value == null) return '';
-    try {
-      final date = DateTime.parse(value.toString()).toLocal();
-      return '${date.day}/${date.month}/${date.year}';
-    } catch (_) {
-      return value.toString();
-    }
-  }
+  // ─────────────────────────── Build ───────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final body = SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final editing = _current != null && rxStatus(_current!) == 'draft';
+    final revising = _current != null && rxStatus(_current!) == 'issued';
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: rxAppBar(
+        context,
+        title: editing
+            ? 'Edit draft'
+            : revising
+            ? 'Revise prescription'
+            : 'Write prescription',
+        subtitle: _patientName.isEmpty ? null : _patientName,
+      ),
+      body: Column(
         children: [
-          Text('Appointment', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          if (_selectedAppointmentId != null)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.person, color: AppTheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_selectedPatientName, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                        Text('Appointment $_selectedAppointmentId', style: GoogleFonts.manrope(fontSize: 10, color: AppTheme.textTertiary)),
-                      ],
+          Expanded(
+            child: _checking
+                ? ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: const [AppFormSkeleton(fields: 6)],
+                  )
+                : GestureDetector(
+                    onTap: () => FocusScope.of(context).unfocus(),
+                    behavior: HitTestBehavior.translucent,
+                    child: ListView(
+                      controller: _scroll,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 28),
+                      children: _form(editing: editing, revising: revising),
                     ),
                   ),
-                  if (widget.initialAppointmentId == null)
-                    IconButton(onPressed: _clearAppointment, icon: const Icon(CupertinoIcons.xmark_circle)),
-                ],
-              ),
-            )
-          else ...[
-            TextField(
-              controller: _patientSearchController,
-              onChanged: _searchAppointments,
-              decoration: InputDecoration(
-                hintText: 'Search your patient appointments...',
-                prefixIcon: const Icon(CupertinoIcons.search, size: 18),
-                suffixIcon: _searching
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    : null,
-              ),
+          ),
+          RxBottomBar(
+            above: _error == null
+                ? null
+                : AppErrorBanner(
+                    message: _error!,
+                    onRetry: () => _save(issue: _lastIssue),
+                  ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: AppSecondaryButton(
+                    label: _saving == 'draft' ? 'Saving…' : 'Save draft',
+                    icon: LucideIcons.save,
+                    onPressed: _saving != null || _checking
+                        ? null
+                        : () => _save(issue: false),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: AppButton(
+                    label: 'Issue',
+                    icon: LucideIcons.send,
+                    loading: _saving == 'issue',
+                    onPressed: _saving != null || _checking
+                        ? null
+                        : () => _save(issue: true),
+                  ),
+                ),
+              ],
             ),
-            if (_searchResults.isNotEmpty)
-              Container(
-                margin: const EdgeInsets.only(top: 6),
-                constraints: const BoxConstraints(maxHeight: 230),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.border),
-                ),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _searchResults.length,
-                  itemBuilder: (_, index) {
-                    final result = _searchResults[index];
-                    final patient = Map<String, dynamic>.from(result['patient'] as Map);
-                    final name = (patient['name'] ?? 'Patient').toString();
-                    return ListTile(
-                      dense: true,
-                      leading: CircleAvatar(child: Text(name.isEmpty ? 'P' : name[0].toUpperCase())),
-                      title: Text(name),
-                      subtitle: Text(
-                        '${_dateLabel(result['appointmentDate'])} ${result['startTime'] ?? ''} • ${result['status'] ?? ''}',
-                      ),
-                      onTap: () => _selectAppointment(result),
-                    );
-                  },
-                ),
-              ),
-          ],
-          const SizedBox(height: 20),
-          Text('Diagnosis', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _diagnosisController,
-            decoration: const InputDecoration(hintText: 'Comma-separated diagnoses'),
           ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Medicines (optional)', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
-              TextButton.icon(onPressed: _addMedicine, icon: const Icon(CupertinoIcons.add_circled, size: 18), label: const Text('Add')),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ..._medicines.asMap().entries.map((entry) {
-            final index = entry.key;
-            final medicine = entry.value;
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Text('Medicine ${index + 1}', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-                      const Spacer(),
-                      IconButton(onPressed: () => _removeMedicine(index), icon: const Icon(CupertinoIcons.trash, size: 18, color: AppTheme.error)),
-                    ],
-                  ),
-                  TextFormField(
-                    initialValue: medicine['medicineName'],
-                    decoration: const InputDecoration(hintText: 'Medicine name'),
-                    onChanged: (v) => medicine['medicineName'] = v,
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          initialValue: medicine['dosage'],
-                          decoration: const InputDecoration(hintText: 'Dosage'),
-                          onChanged: (v) => medicine['dosage'] = v,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextFormField(
-                          initialValue: medicine['duration'],
-                          decoration: const InputDecoration(hintText: 'Duration'),
-                          onChanged: (v) => medicine['duration'] = v,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    initialValue: medicine['frequency'],
-                    decoration: const InputDecoration(hintText: 'Frequency'),
-                    onChanged: (v) => medicine['frequency'] = v,
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    initialValue: medicine['instructions'],
-                    decoration: const InputDecoration(hintText: 'Instructions'),
-                    onChanged: (v) => medicine['instructions'] = v,
-                  ),
-                ],
-              ),
-            );
-          }),
-          const SizedBox(height: 12),
-          Text('Advice / Notes', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          TextField(controller: _notesController, maxLines: 3, decoration: const InputDecoration(hintText: 'Care instructions or notes')),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _saving ? null : () => _savePrescription(issue: false),
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('Save Draft'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _saving ? null : () => _savePrescription(issue: true),
-                  icon: _saving
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.send),
-                  label: Text(_saving ? 'Saving...' : 'Issue'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 40),
         ],
       ),
     );
+  }
 
-    if (widget.embedded) return body;
-    return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        title: Text('Write Prescription', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        backgroundColor: Colors.white,
-        foregroundColor: AppTheme.textPrimary,
-        elevation: 0,
+  List<Widget> _form({required bool editing, required bool revising}) {
+    final gap = const SizedBox(height: 24);
+    return [
+      if (editing || revising) ...[
+        _Note(
+          icon: revising ? LucideIcons.history : LucideIcons.filePen,
+          text: revising
+              ? 'This visit already has ${rxNumber(_current!)} issued. Issuing again replaces it with this revised version.'
+              : 'Continuing the saved draft ${rxNumber(_current!)}.',
+        ),
+        const SizedBox(height: 16),
+      ],
+
+      // Patient
+      KeyedSubtree(
+        key: _patientKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppSectionTitle(
+              'Patient',
+              action: !_locked && (_appointmentId ?? '').isNotEmpty
+                  ? 'Change'
+                  : null,
+              onAction: _pickAppointment,
+            ),
+            if ((_appointmentId ?? '').isNotEmpty)
+              AppGroup(
+                children: [
+                  RxPatientRow(
+                    name: _patientName.isEmpty ? 'Patient' : _patientName,
+                    meta: [
+                      _patientMeta,
+                      _visitLine,
+                    ].where((e) => e.isNotEmpty).join('\n'),
+                  ),
+                ],
+              )
+            else ...[
+              AppPickerField(
+                label: 'Appointment',
+                valueText: 'Choose a patient’s appointment',
+                icon: LucideIcons.userSearch,
+                required: true,
+                margin: EdgeInsets.zero,
+                onTap: _pickAppointment,
+              ),
+              if (_patientError != null) _FieldError(_patientError!),
+            ],
+          ],
+        ),
       ),
-      body: body,
+      gap,
+
+      // Diagnosis
+      KeyedSubtree(
+        key: _diagnosisKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const AppSectionTitle('Diagnosis'),
+            RxChipsInput(
+              label: 'Add diagnosis',
+              hint: 'e.g. Acute pharyngitis',
+              values: _diagnosis,
+              required: true,
+              errorText: _diagnosisError,
+              onChanged: (v) => setState(() => _diagnosis = v),
+            ),
+          ],
+        ),
+      ),
+      gap,
+
+      const AppSectionTitle('Symptoms'),
+      RxChipsInput(
+        label: 'Add symptom',
+        hint: 'e.g. Fever for 3 days',
+        values: _symptoms,
+        suggestions: _apptSymptoms,
+        onChanged: (v) => setState(() => _symptoms = v),
+      ),
+      gap,
+
+      // Medicines
+      KeyedSubtree(
+        key: _medicinesKey,
+        child: AppSectionTitle(
+          _meds.where((m) => !m.isBlank).isEmpty
+              ? 'Medicines'
+              : 'Medicines (${_meds.where((m) => !m.isBlank).length})',
+          action: 'Add',
+          onAction: _addMedicine,
+        ),
+      ),
+      for (final (i, m) in _meds.indexed)
+        Padding(
+          key: ValueKey('med-${m.id}'),
+          padding: const EdgeInsets.only(bottom: 10),
+          child: RxMedicineRow(
+            draft: m,
+            number: i + 1,
+            onRemove: _meds.length == 1 && m.isBlank
+                ? null
+                : () => _removeMedicine(m),
+          ),
+        ),
+      AppSecondaryButton(
+        label: 'Add another medicine',
+        icon: LucideIcons.plus,
+        onPressed: _addMedicine,
+      ),
+      gap,
+
+      const AppSectionTitle('Lab tests'),
+      RxChipsInput(
+        label: 'Add test',
+        hint: 'e.g. CBC',
+        values: _tests,
+        suggestions: _testSuggestions,
+        onChanged: (v) => setState(() => _tests = v),
+      ),
+      gap,
+
+      const AppSectionTitle('Advice and notes'),
+      AppTextField(
+        label: 'Advice for the patient',
+        controller: _advice,
+        hint: 'One per line, e.g. Drink plenty of fluids',
+        maxLines: 3,
+        textCapitalization: TextCapitalization.sentences,
+      ),
+      AppTextField(
+        label: 'Clinical notes',
+        controller: _notes,
+        hint: 'Printed on the prescription',
+        maxLines: 3,
+        margin: EdgeInsets.zero,
+        textCapitalization: TextCapitalization.sentences,
+      ),
+      gap,
+
+      AppSectionTitle(
+        'Follow-up',
+        action: _followUp == null ? null : 'Clear',
+        onAction: () => setState(() => _followUp = null),
+      ),
+      AppPickerField(
+        label: 'Date',
+        valueText: _followUp == null
+            ? 'No follow-up'
+            : '${DateFormat('EEE d MMM yyyy').format(_followUp!)} · ${dayLabel(_followUp)}',
+        onTap: _pickFollowUp,
+        margin: const EdgeInsets.only(bottom: 8),
+      ),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final (label, days) in const [
+            ('In 3 days', 3),
+            ('1 week', 7),
+            ('2 weeks', 14),
+            ('1 month', 30),
+          ])
+            Builder(
+              builder: (_) {
+                final now = DateTime.now();
+                final d = DateTime(now.year, now.month, now.day + days);
+                return RxQuickChip(
+                  label: label,
+                  selected:
+                      _followUp != null && DateUtils.isSameDay(_followUp, d),
+                  onTap: () => setState(() => _followUp = d),
+                );
+              },
+            ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      AppTextField(
+        label: 'Follow-up instructions',
+        controller: _followUpNote,
+        hint: 'e.g. Come back with the CBC report',
+        maxLines: 2,
+        margin: EdgeInsets.zero,
+        textCapitalization: TextCapitalization.sentences,
+      ),
+    ];
+  }
+}
+
+class _Note extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _Note({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: accent.veryLight,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: accent.color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: AppType.sans(
+                fontSize: AppType.caption,
+                color: AppColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _FieldError extends StatelessWidget {
+  final String text;
+  const _FieldError(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 6, left: 2),
+    child: Text(
+      text,
+      style: AppType.sans(fontSize: 11, color: AppColors.error),
+    ),
+  );
 }

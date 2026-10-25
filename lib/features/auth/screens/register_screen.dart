@@ -1,12 +1,23 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/gradient_button.dart';
-import '../../auth/models/user_model.dart';
-import '../../auth/providers/auth_provider.dart';
+import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../pharmacy/theme/pharmacy_colors.dart';
+import '../../pharmacy/theme/pharmacy_type.dart';
+import '../../pharmacy/widgets/pharmacy_ui.dart';
+import '../models/user_model.dart';
+import '../providers/auth_provider.dart';
+import '../widgets/onboarding_backdrop.dart';
+import '../widgets/role_picker.dart';
+import 'login_screen.dart' show kProfessionalRoles;
+
+/// Four-step sign-up: role → account → professional details → review.
+///
+/// Each step is checked before moving on, so a mistake shows next to its
+/// field instead of as a toast three screens later. The phone's back button
+/// steps back rather than throwing the whole form away.
 class RegisterScreen extends ConsumerStatefulWidget {
   /// Set when arriving from the OTP screen, where the number was already
   /// confirmed by SMS.
@@ -28,1099 +39,916 @@ class RegisterScreen extends ConsumerStatefulWidget {
 }
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // A number confirmed by SMS should not then be editable — the token is
-    // bound to it, and changing the field would only fail at submit.
-    if (widget.prefilledPhone != null) {
-      _phoneController.text = widget.prefilledPhone!;
-    }
-  }
+  static const _steps = [
+    'Choose your role',
+    'Your account',
+    'Professional details',
+    'Review and submit',
+  ];
 
   final _pageController = PageController();
-  int _currentStep = 0;
-  final int _totalSteps = 4;
+  int _step = 0;
 
-  // Step 1: Role selection
-  UserRole? _selectedRole;
+  /// Steps whose Continue has been pressed — their errors are shown.
+  final Set<int> _attempted = {};
 
-  // Step 2: Basic details
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _phoneController = TextEditingController();
+  UserRole? _role;
 
-  bool get _phoneAlreadyVerified =>
-      (widget.phoneVerificationToken ?? '').isNotEmpty;
-  final _passwordController = TextEditingController();
+  // Account
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _phone = TextEditingController();
+  final _password = TextEditingController();
+  bool _obscure = true;
   String _gender = '';
   DateTime? _dob;
 
-  // Step 3: Professional details (dynamic based on role)
-  final _licenseController = TextEditingController();
-  final _experienceController = TextEditingController();
-  final _specializationController = TextEditingController();
-  final _clinicNameController = TextEditingController();
-  final _addressController = TextEditingController();
-  final _cityController = TextEditingController();
-  final _stateController = TextEditingController();
-  final _pincodeController = TextEditingController();
-  final _aboutController = TextEditingController();
-  final _consultationFeeController = TextEditingController();
-  final _homeVisitFeeController = TextEditingController();
+  // Professional
+  final _license = TextEditingController();
+  final _experience = TextEditingController();
+  final _specialization = TextEditingController();
+  final _clinicName = TextEditingController();
+  final _address = TextEditingController();
+  final _city = TextEditingController();
+  final _state = TextEditingController();
+  final _pincode = TextEditingController();
+  final _about = TextEditingController();
+  final _consultationFee = TextEditingController();
+  final _homeVisitFee = TextEditingController();
+  final _videoFee = TextEditingController();
 
-  // Step 4: Review and submit
+  /// Which visit types this practitioner offers. Physios must offer home
+  /// visits (the server requires a home-visit fee for them).
+  bool _offerClinic = true;
+  bool _offerVideo = false;
+  bool _offerHome = false;
+  bool get _homeRequired => _role == UserRole.physiotherapist;
+  bool get _homeOn => _homeRequired || _offerHome;
+
   bool _termsAccepted = false;
+
+  List<TextEditingController> get _all => [
+    _name,
+    _email,
+    _phone,
+    _password,
+    _license,
+    _experience,
+    _specialization,
+    _clinicName,
+    _address,
+    _city,
+    _state,
+    _pincode,
+    _about,
+    _consultationFee,
+    _homeVisitFee,
+    _videoFee,
+  ];
+
+  bool get _phoneVerified => (widget.phoneVerificationToken ?? '').isNotEmpty;
+  bool get _isPractitioner =>
+      _role == UserRole.doctor || _role == UserRole.physiotherapist;
+
+  @override
+  void initState() {
+    super.initState();
+    // A number confirmed by SMS isn't editable — the token is bound to it.
+    if (widget.prefilledPhone != null) _phone.text = widget.prefilledPhone!;
+    for (final c in _all) {
+      c.addListener(_revalidate);
+    }
+  }
+
+  void _revalidate() {
+    if (_attempted.contains(_step)) setState(() {});
+  }
 
   @override
   void dispose() {
     _pageController.dispose();
-    _nameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _passwordController.dispose();
-    _licenseController.dispose();
-    _experienceController.dispose();
-    _specializationController.dispose();
-    _clinicNameController.dispose();
-    _addressController.dispose();
-    _cityController.dispose();
-    _stateController.dispose();
-    _pincodeController.dispose();
-    _aboutController.dispose();
-    _consultationFeeController.dispose();
-    _homeVisitFeeController.dispose();
+    for (final c in _all) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  void _nextStep() {
-    if (_currentStep < _totalSteps - 1) {
-      setState(() => _currentStep++);
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOut,
-      );
+  // ─────────────────────────── Validation ───────────────────────────
+
+  static final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$');
+
+  String? _err(int step, String field) {
+    if (!_attempted.contains(step)) return null;
+    return _errors(step)[field];
+  }
+
+  /// Field → message for everything wrong on [step]. Rules match the
+  /// server's (auth.controller validateRegistrationData) so nothing passes
+  /// here only to fail at submit.
+  Map<String, String> _errors(int step) {
+    final e = <String, String>{};
+    String t(TextEditingController c) => c.text.trim();
+    switch (step) {
+      case 0:
+        if (_role == null) e['role'] = 'Choose the role that fits you';
+      case 1:
+        if (t(_name).length < 2) e['name'] = 'Enter your full name';
+        if (!_emailPattern.hasMatch(t(_email))) {
+          e['email'] = 'Enter a valid email';
+        }
+        if (!RegExp(r'^[0-9]{10}$').hasMatch(t(_phone))) {
+          e['phone'] = 'Enter a 10-digit mobile number';
+        }
+        if (_password.text.length < 6) {
+          e['password'] = 'Use at least 6 characters';
+        }
+      case 2:
+        if (t(_license).isEmpty) e['license'] = 'Required for verification';
+        if (_isPractitioner && t(_specialization).isEmpty) {
+          e['specialization'] = 'Enter at least one specialisation';
+        }
+        if (_isPractitioner) {
+          bool bad(TextEditingController c) {
+            final fee = num.tryParse(t(c));
+            return fee == null || fee <= 0;
+          }
+
+          if (!_offerClinic && !_offerVideo && !_homeOn) {
+            e['visitTypes'] = 'Offer at least one kind of visit';
+          }
+          if (_offerClinic && bad(_consultationFee))
+            e['fee'] = 'Enter your fee';
+          if (_offerVideo && bad(_videoFee)) e['videoFee'] = 'Enter your fee';
+          if (_homeOn && bad(_homeVisitFee)) e['homeFee'] = 'Enter your fee';
+        }
+        if (!_isPractitioner && t(_clinicName).isEmpty) {
+          e['clinic'] = _role == UserRole.pathology
+              ? 'Enter the lab’s name'
+              : 'Enter the pharmacy’s name';
+        }
+        if (t(_pincode).isNotEmpty &&
+            !RegExp(r'^\d{6}$').hasMatch(t(_pincode))) {
+          e['pincode'] = 'Pincode has 6 digits';
+        }
+      case 3:
+        if (!_termsAccepted) e['terms'] = 'Accept the terms to continue';
+    }
+    return e;
+  }
+
+  // ─────────────────────────── Navigation ───────────────────────────
+
+  void _goTo(int step) {
+    FocusScope.of(context).unfocus();
+    setState(() => _step = step);
+    _pageController.animateToPage(
+      step,
+      duration: PharmacyMotion.medium,
+      curve: PharmacyMotion.enter,
+    );
+  }
+
+  void _continue() {
+    setState(() => _attempted.add(_step));
+    if (_errors(_step).isNotEmpty) {
+      HapticFeedback.lightImpact();
+      return;
+    }
+    if (_step < _steps.length - 1) {
+      _goTo(_step + 1);
+    } else {
+      _submit();
     }
   }
 
-  void _prevStep() {
-    if (_currentStep > 0) {
-      setState(() => _currentStep--);
-      _pageController.previousPage(
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOut,
-      );
+  void _back() {
+    if (_step > 0) {
+      _goTo(_step - 1);
     } else {
       Navigator.pop(context);
     }
   }
 
-  Future<void> _submitRegistration() async {
-    if (_selectedRole == null || !_termsAccepted) return;
+  // ─────────────────────────── Submit ───────────────────────────
 
-    final name = _nameController.text.trim();
-    final email = _emailController.text.trim();
-    final phone = _phoneController.text.trim();
-    final password = _passwordController.text.trim();
-
-    final validationError = _registrationValidationError();
-    if (validationError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(validationError), backgroundColor: Colors.red),
-      );
-      return;
+  Future<void> _submit() async {
+    // Re-check every step: Edit on the review page can leave one invalid.
+    for (var s = 0; s < _steps.length; s++) {
+      if (_errors(s).isNotEmpty) {
+        setState(() => _attempted.add(s));
+        _goTo(s);
+        return;
+      }
     }
 
-    final authNotifier = ref.read(authProvider.notifier);
-    final registered = await authNotifier.register(
-      name: name,
-      email: email,
-      phone: phone,
-      password: password,
-      role: _selectedRole!,
+    final auth = ref.read(authProvider.notifier);
+    final registered = await auth.register(
+      name: _name.text.trim(),
+      email: _email.text.trim(),
+      phone: _phone.text.trim(),
+      password: _password.text.trim(),
+      role: _role!,
       verificationToken: widget.phoneVerificationToken,
     );
-
     if (!mounted) return;
     if (!registered) {
-      final error = ref.read(authProvider).error;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error ?? 'Registration failed'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _toast(ref.read(authProvider).error ?? 'Registration failed');
       return;
     }
 
-    // The current backend returns a JWT on successful registration. Complete
-    // the actual role profile immediately instead of discarding the fields
-    // collected by this wizard.
-    final user = ref.read(authProvider).user;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Registration successful. Please sign in to complete your profile.',
-          ),
-          backgroundColor: Colors.green,
-        ),
+    // The backend returns a JWT on registration; complete the role profile
+    // straight away rather than discarding what this wizard collected.
+    if (ref.read(authProvider).user == null) {
+      _toast(
+        'Account created. Sign in to finish your profile.',
+        color: PharmacyColors.textStrong,
       );
       Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
       return;
     }
 
-    final profileCompleted = await authNotifier.completeProfile(
-      _buildProfessionalProfilePayload(),
-    );
+    final completed = await auth.completeProfile(_profilePayload());
     if (!mounted) return;
-
-    if (!profileCompleted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            ref.read(authProvider).error ??
-                'Account created, but professional profile submission failed.',
-          ),
-          backgroundColor: Colors.red,
-        ),
+    if (!completed) {
+      _toast(
+        ref.read(authProvider).error ??
+            'Account created, but your professional details didn’t save. Try again.',
       );
       return;
     }
-
-    // Registration + profile completion just succeeded, so profileCompleted
-    // is true — go straight to the dashboard. Admin verification (separately
-    // tracked) only affects public discoverability, not the professional's
-    // own access to their dashboard/store/inventory.
+    // Admin verification only affects public discoverability, not the
+    // professional's access to their own dashboard.
     Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
   }
 
-  String? _registrationValidationError() {
-    if (_nameController.text.trim().isEmpty ||
-        _emailController.text.trim().isEmpty ||
-        _phoneController.text.trim().isEmpty ||
-        _passwordController.text.trim().isEmpty) {
-      return 'Please fill in all required account fields.';
-    }
-    if (_licenseController.text.trim().isEmpty) {
-      return 'License / registration number is required.';
-    }
-    if ((_selectedRole == UserRole.doctor ||
-            _selectedRole == UserRole.physiotherapist) &&
-        _specializationController.text.trim().isEmpty) {
-      return 'Specialization is required.';
-    }
-    if (_selectedRole == UserRole.doctor ||
-        _selectedRole == UserRole.physiotherapist) {
-      final consultationFee = num.tryParse(
-        _consultationFeeController.text.trim(),
-      );
-      if (consultationFee == null || consultationFee <= 0) {
-        return 'Enter a valid consultation fee.';
-      }
-    }
-    if (_selectedRole == UserRole.physiotherapist) {
-      final homeVisitFee = num.tryParse(_homeVisitFeeController.text.trim());
-      if (homeVisitFee == null || homeVisitFee <= 0) {
-        return 'Enter a valid home-visit fee.';
-      }
-    }
-    if ((_selectedRole == UserRole.pathology ||
-            _selectedRole == UserRole.pharmacy) &&
-        _clinicNameController.text.trim().isEmpty) {
-      return _selectedRole == UserRole.pathology
-          ? 'Lab name is required.'
-          : 'Pharmacy name is required.';
-    }
-    return null;
-  }
-
-  Map<String, dynamic> _buildProfessionalProfilePayload() {
-    final role = _selectedRole!;
+  Map<String, dynamic> _profilePayload() {
     final address = <String, dynamic>{
-      'street': _addressController.text.trim(),
-      'address': _addressController.text.trim(),
-      'city': _cityController.text.trim(),
-      'state': _stateController.text.trim(),
-      'pincode': _pincodeController.text.trim(),
+      'street': _address.text.trim(),
+      'address': _address.text.trim(),
+      'city': _city.text.trim(),
+      'state': _state.text.trim(),
+      'pincode': _pincode.text.trim(),
     };
-    final specialization = _specializationController.text
+    final specialization = _specialization.text
         .split(',')
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
+        .map((v) => v.trim())
+        .where((v) => v.isNotEmpty)
         .toList();
-    final experienceYears =
-        int.tryParse(_experienceController.text.trim()) ?? 0;
-    final consultationFee =
-        num.tryParse(_consultationFeeController.text.trim()) ?? 0;
-    final homeVisitFee = num.tryParse(_homeVisitFeeController.text.trim()) ?? 0;
+    final experienceYears = int.tryParse(_experience.text.trim()) ?? 0;
+    num fee(TextEditingController c) => num.tryParse(c.text.trim()) ?? 0;
+    final videoFee = _offerVideo ? fee(_videoFee) : 0;
+    final homeVisitFee = _homeOn ? fee(_homeVisitFee) : 0;
+    // The server needs a base consultation fee even when clinic visits are
+    // off; use the clinic fee, else the first fee that was entered.
+    final consultationFee = _offerClinic
+        ? fee(_consultationFee)
+        : (videoFee > 0 ? videoFee : homeVisitFee);
 
-    switch (role) {
+    switch (_role!) {
       case UserRole.doctor:
         return {
-          'name': _nameController.text.trim(),
-          if (_gender.isNotEmpty) 'gender': _gender.toLowerCase(),
+          'name': _name.text.trim(),
+          if (_gender.isNotEmpty) 'gender': _gender,
           if (_dob != null) 'dateOfBirth': _dob!.toIso8601String(),
           'specialization': specialization,
           'experienceYears': experienceYears,
-          'licenseNumber': _licenseController.text.trim(),
-          'clinicName': _clinicNameController.text.trim(),
+          'licenseNumber': _license.text.trim(),
+          'clinicName': _clinicName.text.trim(),
           'clinicAddress': address,
           'consultationFee': consultationFee,
           'homeVisitFee': homeVisitFee,
-          'about': _aboutController.text.trim(),
+          'videoCallFee': videoFee,
+          'clinicConsultationEnabled': _offerClinic,
+          'teleconsultationEnabled': _offerVideo,
+          'homeVisitEnabled': _offerHome,
+          'about': _about.text.trim(),
         };
       case UserRole.physiotherapist:
         return {
-          'name': _nameController.text.trim(),
-          if (_gender.isNotEmpty) 'gender': _gender.toLowerCase(),
+          'name': _name.text.trim(),
+          if (_gender.isNotEmpty) 'gender': _gender,
           if (_dob != null) 'dateOfBirth': _dob!.toIso8601String(),
           'specialization': specialization,
           'experienceYears': experienceYears,
-          'licenseNumber': _licenseController.text.trim(),
+          'licenseNumber': _license.text.trim(),
           'clinicAddress': address,
           'consultationFee': consultationFee,
           'homeVisitFee': homeVisitFee,
-          'about': _aboutController.text.trim(),
+          'videoCallFee': videoFee,
+          'about': _about.text.trim(),
         };
       case UserRole.pathology:
         return {
-          'labName': _clinicNameController.text.trim(),
-          'registrationNumber': _licenseController.text.trim(),
+          'labName': _clinicName.text.trim(),
+          'registrationNumber': _license.text.trim(),
           'address': address,
-          'contactPerson': _nameController.text.trim(),
+          'contactPerson': _name.text.trim(),
         };
       case UserRole.pharmacy:
         return {
-          'pharmacyName': _clinicNameController.text.trim(),
-          'licenseNumber': _licenseController.text.trim(),
+          'pharmacyName': _clinicName.text.trim(),
+          'licenseNumber': _license.text.trim(),
           'address': address,
-          'contactPerson': _nameController.text.trim(),
+          'contactPerson': _name.text.trim(),
         };
       case UserRole.mr:
-        // MR users are manager/admin provisioned and are not offered in this
-        // public registration wizard.
+        // MR users are provisioned by a manager, not offered here.
         return const <String, dynamic>{};
     }
   }
 
-  String _getRoleTitle() {
-    switch (_selectedRole) {
-      case UserRole.doctor:
-        return 'Doctor';
-      case UserRole.physiotherapist:
-        return 'Physiotherapist';
-      case UserRole.pathology:
-        return 'Pathology Lab';
-      case UserRole.pharmacy:
-        return 'Pharmacy';
-      default:
-        return 'Professional';
-    }
+  void _toast(String message, {Color color = PharmacyColors.error}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: PharmacyType.sans(
+            fontSize: PharmacyType.caption,
+            color: Colors.white,
+          ),
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: color,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
+
+  // ─────────────────────────── Build ───────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.surface,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: _prevStep,
-                    icon: const Icon(
-                      CupertinoIcons.back,
-                      color: AppTheme.textPrimary,
-                    ),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: const BorderSide(color: AppTheme.border),
-                      ),
+    final loading = ref.watch(authProvider.select((s) => s.isLoading));
+    final last = _step == _steps.length - 1;
+
+    return PopScope(
+      canPop: _step == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: Scaffold(
+        backgroundColor: PharmacyColors.bg,
+        body: OnboardingBackdrop(
+          child: SafeArea(
+            child: Column(
+              children: [
+                _header(),
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      _page(_roleStep()),
+                      _page(_accountStep()),
+                      _page(_professionalStep()),
+                      _page(_reviewStep()),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+                  decoration: const BoxDecoration(
+                    color: PharmacyColors.bg,
+                    border: Border(
+                      top: BorderSide(color: PharmacyColors.border),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Step ${_currentStep + 1} of $_totalSteps',
-                          style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textTertiary,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // The role can't be switched after sign-up; say so
+                      // where the choice is confirmed.
+                      if (_step == 0 && _role != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                LucideIcons.lock,
+                                size: 12,
+                                color: PharmacyColors.textTertiary,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Your role can’t be changed after sign-up',
+                                style: PharmacyType.sans(
+                                  fontSize: PharmacyType.caption,
+                                  color: PharmacyColors.textTertiary,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _getStepTitle(),
-                          style: GoogleFonts.manrope(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
+                      // On the role step the button previews the chosen
+                      // module's colour.
+                      ModuleTheme(
+                        accent: _step == 0 && _role != null
+                            ? accentForRole(_role!)
+                            : ModuleAccent.of(context),
+                        child: PharmacyButton(
+                          label: last
+                              ? 'Create account'
+                              : _step == 0 && _role != null
+                              ? 'Continue as ${_roleTitle(_role!)}'
+                              : 'Continue',
+                          icon: last ? LucideIcons.circleCheckBig : null,
+                          loading: loading,
+                          onPressed: loading ? null : _continue,
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Progress bar
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              child: Row(
-                children: List.generate(_totalSteps, (index) {
-                  return Expanded(
-                    child: Container(
-                      height: 4,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(2),
-                        color: index <= _currentStep
-                            ? AppTheme.primary
-                            : AppTheme.divider,
                       ),
-                    ),
-                  );
-                }),
-              ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-
-            // Content
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildRoleSelection(),
-                  _buildBasicDetails(),
-                  _buildProfessionalDetails(),
-                  _buildDocumentsAndSubmit(),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  String _getStepTitle() {
-    switch (_currentStep) {
-      case 0:
-        return 'Select Your Role';
-      case 1:
-        return 'Basic Details';
-      case 2:
-        return 'Professional Details';
-      case 3:
-        return 'Review & Submit';
-      default:
-        return '';
-    }
-  }
-
-  // Step 1: Role Selection
-  Widget _buildRoleSelection() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'What type of healthcare professional are you?',
-            style: GoogleFonts.manrope(
-              fontSize: 15,
-              color: AppTheme.textSecondary,
+  Widget _header() => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 6, 20, 0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: _step == 0 ? 'Back to sign in' : 'Previous step',
+              onPressed: _back,
+              icon: const Icon(
+                LucideIcons.arrowLeft,
+                size: 20,
+                color: PharmacyColors.textStrong,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              'Step ${_step + 1} of ${_steps.length}',
+              style: PharmacyType.sans(
+                fontSize: PharmacyType.caption,
+                fontWeight: FontWeight.w600,
+                color: PharmacyColors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 0, 14),
+          child: AnimatedSwitcher(
+            duration: PharmacyMotion.fast,
+            child: Text(
+              _steps[_step],
+              key: ValueKey(_step),
+              style: PharmacyType.sans(
+                fontSize: PharmacyType.display,
+                fontWeight: FontWeight.w800,
+                color: PharmacyColors.textStrong,
+                letterSpacing: -0.5,
+              ),
             ),
           ),
-          const SizedBox(height: 24),
-          _buildRoleCard(
-            UserRole.doctor,
-            Icons.medical_services_outlined,
-            'Doctor',
-            'General Physician, Specialist, Surgeon, etc.',
-            AppTheme.doctorAccent,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: Row(
+            children: [
+              for (var i = 0; i < _steps.length; i++)
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: PharmacyMotion.medium,
+                    curve: PharmacyMotion.enter,
+                    height: 4,
+                    margin: EdgeInsets.only(
+                      right: i == _steps.length - 1 ? 0 : 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: i <= _step
+                          ? ModuleAccent.of(context).color
+                          : PharmacyColors.borderStrong,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 12),
-          _buildRoleCard(
-            UserRole.physiotherapist,
-            CupertinoIcons.waveform_path,
-            'Physiotherapist',
-            'Physical therapist, Rehabilitation specialist',
-            AppTheme.physioAccent,
-          ),
-          const SizedBox(height: 12),
-          _buildRoleCard(
-            UserRole.pathology,
-            Icons.biotech_outlined,
-            'Pathology Lab',
-            'Diagnostic center, Testing laboratory',
-            AppTheme.pathologyAccent,
-          ),
-          const SizedBox(height: 12),
-          _buildRoleCard(
-            UserRole.pharmacy,
-            Icons.apartment_outlined,
-            'Pharmacy',
-            'Medical store, Pharmacy chain, Online pharmacy',
-            AppTheme.pharmacyAccent,
-          ),
-          const SizedBox(height: 32),
-          GradientButton(
-            text: 'Continue',
-            icon: CupertinoIcons.chevron_right,
-            onPressed: _selectedRole != null ? _nextStep : () {},
-          ),
-        ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _page(Widget child) => SingleChildScrollView(
+    padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+    child: child,
+  );
+
+  Widget _intro(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 18),
+    child: Text(
+      text,
+      style: PharmacyType.sans(
+        fontSize: PharmacyType.body,
+        color: PharmacyColors.textSecondary,
       ),
+    ),
+  );
+
+  String _roleTitle(UserRole r) => switch (r) {
+    UserRole.doctor => 'doctor',
+    UserRole.physiotherapist => 'physiotherapist',
+    UserRole.pathology => 'lab',
+    UserRole.pharmacy => 'pharmacy',
+    UserRole.mr => 'MR',
+  };
+
+  // ── Step 1 ──
+  Widget _roleStep() {
+    final error = _err(0, 'role');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _intro('Pick what you do — you’ll get the tools built for it.'),
+        RolePicker(
+          selected: _role,
+          onSelect: (r) {
+            HapticFeedback.selectionClick();
+            setState(() => _role = r);
+          },
+        ),
+        if (error != null) _fieldError(error),
+      ],
     );
   }
 
-  Widget _buildRoleCard(
-    UserRole role,
-    IconData icon,
-    String title,
-    String subtitle,
-    Color color,
-  ) {
-    final isSelected = _selectedRole == role;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedRole = role),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.06) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? color : AppTheme.border,
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.15),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+  // ── Step 2 ──
+  Widget _accountStep() {
+    const s = 1;
+    final personal = _isPractitioner;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _intro(
+          personal
+              ? 'You’ll sign in with this email and password.'
+              : 'The person who manages this account. You’ll sign in with this email and password.',
+        ),
+        PharmacyTextField(
+          label: personal ? 'Full name' : 'Contact person',
+          controller: _name,
+          icon: LucideIcons.user,
+          hint: personal ? 'As on your registration certificate' : 'Your name',
+          required: true,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.name],
+          errorText: _err(s, 'name'),
+        ),
+        PharmacyTextField(
+          label: 'Email',
+          controller: _email,
+          icon: LucideIcons.mail,
+          hint: 'you@example.com',
+          required: true,
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.email],
+          errorText: _err(s, 'email'),
+        ),
+        PharmacyTextField(
+          label: 'Mobile number',
+          controller: _phone,
+          icon: LucideIcons.phone,
+          hint: '10-digit number',
+          required: true,
+          readOnly: _phoneVerified,
+          keyboardType: TextInputType.phone,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.telephoneNumberNational],
+          errorText: _err(s, 'phone'),
+          trailing: _phoneVerified
+              ? Tooltip(
+                  message: 'Verified by OTP',
+                  child: Icon(
+                    LucideIcons.badgeCheck,
+                    size: 18,
+                    color: ModuleAccent.of(context).color,
                   ),
-                ]
+                )
               : null,
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, size: 28, color: color),
+        PharmacyTextField(
+          label: 'Password',
+          controller: _password,
+          icon: LucideIcons.lock,
+          hint: 'At least 6 characters',
+          required: true,
+          obscureText: _obscure,
+          autofillHints: const [AutofillHints.newPassword],
+          errorText: _err(s, 'password'),
+          margin: const EdgeInsets.only(bottom: 6),
+          trailing: IconButton(
+            tooltip: _obscure ? 'Show password' : 'Hide password',
+            onPressed: () => setState(() => _obscure = !_obscure),
+            icon: Icon(
+              _obscure ? LucideIcons.eye : LucideIcons.eyeOff,
+              size: 18,
+              color: PharmacyColors.textTertiary,
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.manrope(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? color : AppTheme.divider,
-                  width: 2,
-                ),
-                color: isSelected ? color : Colors.transparent,
-              ),
-              child: isSelected
-                  ? const Icon(Icons.check, size: 14, color: Colors.white)
-                  : null,
-            ),
-          ],
+          ),
         ),
-      ),
-    );
-  }
-
-  // Step 2: Basic Details
-  Widget _buildBasicDetails() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Tell us about yourself',
-            style: GoogleFonts.manrope(
-              fontSize: 15,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          _buildLabel('Full Name'),
-          TextField(
-            controller: _nameController,
-            decoration: const InputDecoration(
-              hintText: 'Enter your full name',
-              prefixIcon: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.person,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildLabel('Email Address'),
-          TextField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              hintText: 'Enter your email',
-              prefixIcon: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.mail,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildLabel('Phone Number'),
-          TextField(
-            controller: _phoneController,
-            keyboardType: TextInputType.phone,
-            // Locked when it arrived verified: the token from the OTP step is
-            // bound to this exact number, so editing it here could only fail
-            // at submit time.
-            readOnly: _phoneAlreadyVerified,
-            decoration: InputDecoration(
-              suffixIcon: _phoneAlreadyVerified
-                  ? const Padding(
-                      padding: EdgeInsets.only(right: 12),
-                      child: Icon(
-                        CupertinoIcons.checkmark_seal_fill,
-                        size: 18,
-                        color: AppTheme.success,
-                      ),
-                    )
-                  : null,
-              hintText: 'Enter your phone number',
-              prefixIcon: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.phone,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildLabel('Gender'),
+        _PasswordStrength(password: _password.text),
+        if (personal) ...[
+          const SizedBox(height: 18),
+          _label('Gender'),
           Row(
-            children: ['Male', 'Female', 'Other'].map((g) {
-              final isSelected = _gender == g.toLowerCase();
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _gender = g.toLowerCase()),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppTheme.primary.withValues(alpha: 0.1)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected ? AppTheme.primary : AppTheme.divider,
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        g,
-                        style: GoogleFonts.manrope(
-                          fontSize: 14,
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          color: isSelected
-                              ? AppTheme.primary
-                              : AppTheme.textSecondary,
-                        ),
-                      ),
+            children: [
+              for (final g in const ['Male', 'Female', 'Other'])
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: g == 'Other' ? 0 : 8),
+                    child: PharmacyFilterChip(
+                      block: true,
+                      label: g,
+                      selected: _gender == g.toLowerCase(),
+                      onTap: () => setState(() => _gender = g.toLowerCase()),
                     ),
                   ),
                 ),
-              );
-            }).toList(),
+            ],
           ),
           const SizedBox(height: 16),
-
-          _buildLabel('Date of Birth'),
-          GestureDetector(
+          PharmacyPickerField(
+            label: 'Date of birth',
+            valueText: _dob == null
+                ? 'Select date'
+                : DateFormat('d MMM yyyy').format(_dob!),
             onTap: () async {
+              final now = DateTime.now();
               final picked = await showDatePicker(
                 context: context,
-                initialDate: DateTime(1990),
+                initialDate: _dob ?? DateTime(now.year - 30),
                 firstDate: DateTime(1940),
-                lastDate: DateTime.now(),
+                lastDate: DateTime(now.year - 18, now.month, now.day),
               );
               if (picked != null) setState(() => _dob = picked);
             },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F9FF),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFBAE6FD)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    CupertinoIcons.calendar,
-                    size: 20,
-                    color: AppTheme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _dob != null
-                        ? '${_dob!.day}/${_dob!.month}/${_dob!.year}'
-                        : 'Select date of birth',
-                    style: GoogleFonts.manrope(
-                      fontSize: 14,
-                      color: _dob != null
-                          ? AppTheme.textPrimary
-                          : AppTheme.textTertiary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildLabel('Password'),
-          TextField(
-            controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              hintText: 'Create a strong password',
-              prefixIcon: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.lock,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          GradientButton(
-            text: 'Continue',
-            icon: CupertinoIcons.chevron_right,
-            onPressed: _nextStep,
+            margin: EdgeInsets.zero,
           ),
         ],
-      ),
+      ],
     );
   }
 
-  // Step 3: Professional Details
-  Widget _buildProfessionalDetails() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Professional information for ${_getRoleTitle()}',
-            style: GoogleFonts.manrope(
-              fontSize: 15,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 24),
+  // ── Step 3 ──
+  Widget _professionalStep() {
+    const s = 2;
+    final role = _role;
+    final orgLabel = role == UserRole.pathology
+        ? 'Lab name'
+        : role == UserRole.pharmacy
+        ? 'Pharmacy name'
+        : 'Clinic or hospital';
+    final licenseLabel = role == UserRole.pathology
+        ? 'Lab registration number'
+        : role == UserRole.pharmacy
+        ? 'Drug licence number'
+        : 'Medical registration number';
 
-          if (_selectedRole == UserRole.doctor ||
-              _selectedRole == UserRole.physiotherapist) ...[
-            _buildLabel('Specialization'),
-            TextField(
-              controller: _specializationController,
-              decoration: InputDecoration(
-                hintText: _selectedRole == UserRole.doctor
-                    ? 'e.g., Cardiologist, General Physician'
-                    : 'e.g., Sports Physio, Neuro Physio',
-                prefixIcon: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(
-                    Icons.workspace_premium_outlined,
-                    size: 20,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          _buildLabel(
-            _selectedRole == UserRole.pathology
-                ? 'Lab License Number'
-                : _selectedRole == UserRole.pharmacy
-                ? 'Drug License Number'
-                : 'Medical License Number',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _intro(
+          'Checked by our team before you appear to patients. You can use the app meanwhile.',
+        ),
+        if (!_isPractitioner)
+          PharmacyTextField(
+            label: orgLabel,
+            controller: _clinicName,
+            icon: role == UserRole.pharmacy
+                ? LucideIcons.store
+                : LucideIcons.building2,
+            required: true,
+            textCapitalization: TextCapitalization.words,
+            errorText: _err(s, 'clinic'),
           ),
-          TextField(
-            controller: _licenseController,
-            decoration: InputDecoration(
-              hintText: 'Enter license number',
-              prefixIcon: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.doc,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
+        PharmacyTextField(
+          label: licenseLabel,
+          controller: _license,
+          icon: LucideIcons.fileBadge,
+          hint: role == UserRole.pharmacy ? 'e.g. 20B/21B-MH-12345' : null,
+          required: true,
+          textCapitalization: TextCapitalization.characters,
+          errorText: _err(s, 'license'),
+        ),
+        if (_isPractitioner) ...[
+          PharmacyTextField(
+            label: 'Specialisation',
+            controller: _specialization,
+            icon: LucideIcons.award,
+            hint: role == UserRole.doctor
+                ? 'e.g. General physician, Cardiology'
+                : 'e.g. Sports, Neuro',
+            required: true,
+            textCapitalization: TextCapitalization.words,
+            errorText: _err(s, 'specialization'),
           ),
+          PharmacyTextField(
+            label: 'Years of experience',
+            controller: _experience,
+            icon: LucideIcons.briefcase,
+            isNum: true,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(2),
+            ],
+          ),
+          const SizedBox(height: 4),
+          PharmacySectionTitle('Visit types you offer'),
+          _visitTypes(s),
           const SizedBox(height: 16),
-
-          if (_selectedRole == UserRole.doctor ||
-              _selectedRole == UserRole.physiotherapist) ...[
-            _buildLabel('Years of Experience'),
-            TextField(
-              controller: _experienceController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'Enter years of experience',
-                prefixIcon: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(
-                    CupertinoIcons.briefcase,
-                    size: 20,
-                    color: AppTheme.primary,
-                  ),
-                ),
+          if (role == UserRole.doctor)
+            PharmacyTextField(
+              label: orgLabel,
+              controller: _clinicName,
+              icon: LucideIcons.building2,
+              hint: 'Optional',
+              textCapitalization: TextCapitalization.words,
+            ),
+        ],
+        const SizedBox(height: 4),
+        PharmacySectionTitle(
+          role == UserRole.pharmacy || role == UserRole.pathology
+              ? 'Address'
+              : 'Where you practise',
+        ),
+        PharmacyTextField(
+          label: 'Street address',
+          controller: _address,
+          icon: LucideIcons.mapPin,
+          maxLines: 2,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: PharmacyTextField(
+                label: 'City',
+                controller: _city,
+                textCapitalization: TextCapitalization.words,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(width: 12),
+            Expanded(
+              child: PharmacyTextField(
+                label: 'State',
+                controller: _state,
+                textCapitalization: TextCapitalization.words,
+              ),
+            ),
           ],
-
-          if (_selectedRole == UserRole.doctor ||
-              _selectedRole == UserRole.physiotherapist) ...[
-            _buildLabel('Consultation Fee (INR)'),
-            TextField(
-              controller: _consultationFeeController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'e.g., 500',
-                prefixIcon: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(
-                    Icons.account_balance_wallet_outlined,
-                    size: 20,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
+        ),
+        PharmacyTextField(
+          label: 'Pincode',
+          controller: _pincode,
+          isNum: true,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(6),
           ],
-
-          if (_selectedRole == UserRole.physiotherapist) ...[
-            _buildLabel('Home Visit Fee (INR)'),
-            TextField(
-              controller: _homeVisitFeeController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'e.g., 800',
-                prefixIcon: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14),
-                  child: Icon(
-                    CupertinoIcons.house,
-                    size: 20,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          _buildLabel(
-            _selectedRole == UserRole.pathology
-                ? 'Lab Name'
-                : _selectedRole == UserRole.pharmacy
-                ? 'Pharmacy Name'
-                : 'Clinic / Hospital Name',
+          errorText: _err(s, 'pincode'),
+        ),
+        if (_isPractitioner)
+          PharmacyTextField(
+            label: 'About you',
+            controller: _about,
+            hint: 'What patients should know — shown on your profile',
+            maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            margin: EdgeInsets.zero,
           ),
-          TextField(
-            controller: _clinicNameController,
-            decoration: InputDecoration(
-              hintText: _selectedRole == UserRole.pathology
-                  ? 'Enter lab name'
-                  : _selectedRole == UserRole.pharmacy
-                  ? 'Enter pharmacy name'
-                  : 'Enter clinic name',
-              prefixIcon: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  Icons.apartment_outlined,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
+      ],
+    );
+  }
 
-          _buildLabel('Address'),
-          TextField(
-            controller: _addressController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              hintText: 'Enter full address',
-              prefixIcon: Padding(
-                padding: EdgeInsets.only(left: 14, right: 14, bottom: 24),
-                child: Icon(
-                  CupertinoIcons.location,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
+  // ── Step 4 ──
+  Widget _reviewStep() {
+    final roleInfo = kProfessionalRoles.where((r) => r.role == _role);
+    String v(TextEditingController c) =>
+        c.text.trim().isEmpty ? '—' : c.text.trim();
+    final place = [
+      _city.text.trim(),
+      _state.text.trim(),
+      _pincode.text.trim(),
+    ].where((e) => e.isNotEmpty).join(', ');
+    final next = switch (_role) {
+      UserRole.pharmacy => 'set up your stock and start taking online orders.',
+      UserRole.pathology => 'add your test menu and start taking bookings.',
+      _ => 'set your availability and start taking appointments.',
+    };
 
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _intro('Check your details. You can edit anything before submitting.'),
+        _reviewGroup('Account', 1, [
+          ('Role', roleInfo.isEmpty ? '—' : roleInfo.first.title),
+          (_isPractitioner ? 'Name' : 'Contact person', v(_name)),
+          ('Email', v(_email)),
+          ('Mobile', v(_phone)),
+        ]),
+        const SizedBox(height: 18),
+        _reviewGroup('Professional', 2, [
+          if (!_isPractitioner || _clinicName.text.trim().isNotEmpty)
+            (
+              _role == UserRole.pathology
+                  ? 'Lab'
+                  : _role == UserRole.pharmacy
+                  ? 'Pharmacy'
+                  : 'Clinic',
+              v(_clinicName),
+            ),
+          ('Licence', v(_license)),
+          if (_isPractitioner) ('Specialisation', v(_specialization)),
+          if (_isPractitioner && _offerClinic)
+            (
+              _role == UserRole.doctor ? 'Clinic visit' : 'Clinic session',
+              '₹${_consultationFee.text.trim()}',
+            ),
+          if (_isPractitioner && _offerVideo)
+            ('Video consultation', '₹${_videoFee.text.trim()}'),
+          if (_isPractitioner && _homeOn)
+            ('Home visit', '₹${_homeVisitFee.text.trim()}'),
+          if (place.isNotEmpty) ('Location', place),
+        ]),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: ModuleAccent.of(context).veryLight,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildLabel('City'),
-                    TextField(
-                      controller: _cityController,
-                      decoration: const InputDecoration(hintText: 'City'),
-                    ),
-                  ],
-                ),
+              Icon(
+                LucideIcons.shieldCheck,
+                size: 18,
+                color: ModuleAccent.of(context).color,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildLabel('State'),
-                    TextField(
-                      controller: _stateController,
-                      decoration: const InputDecoration(hintText: 'State'),
-                    ),
-                  ],
+                child: Text(
+                  'Your licence is verified within 24–48 hours; we may ask for a document. '
+                  'You can use the app meanwhile — $next',
+                  style: PharmacyType.sans(
+                    fontSize: PharmacyType.small,
+                    height: 1.45,
+                    color: PharmacyColors.textPrimary,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          _buildLabel('Pincode'),
-          TextField(
-            controller: _pincodeController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: 'Enter pincode',
-              prefixIcon: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Icon(
-                  CupertinoIcons.map,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildLabel('About'),
-          TextField(
-            controller: _aboutController,
-            maxLines: 3,
-            decoration: InputDecoration(
-              hintText: 'Tell patients about your practice...',
-              prefixIcon: const Padding(
-                padding: EdgeInsets.only(left: 14, right: 14, bottom: 48),
-                child: Icon(
-                  CupertinoIcons.info_circle,
-                  size: 20,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          GradientButton(
-            text: 'Continue',
-            icon: CupertinoIcons.chevron_right,
-            onPressed: _nextStep,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Step 4: Review & Submit
-  Widget _buildDocumentsAndSubmit() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  CupertinoIcons.checkmark_shield,
-                  color: AppTheme.primary,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Your license number and professional details will be submitted for verification. '
-                    'The verification team may request supporting identity or qualification documents before approval.',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      height: 1.5,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Review Summary Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: AppTheme.primary.withValues(alpha: 0.15),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      CupertinoIcons.info_circle,
-                      size: 20,
-                      color: AppTheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'What happens next?',
-                      style: GoogleFonts.manrope(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildInfoStep(
-                  '1',
-                  'Your profile will be reviewed by our admin team',
-                ),
-                const SizedBox(height: 8),
-                _buildInfoStep('2', 'Verification typically takes 24-48 hours'),
-                const SizedBox(height: 8),
-                _buildInfoStep('3', 'You\'ll be notified once approved'),
-                const SizedBox(height: 8),
-                _buildInfoStep(
-                  '4',
-                  'Start accepting appointments & grow your practice',
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // Terms checkbox
-          GestureDetector(
-            onTap: () => setState(() => _termsAccepted = !_termsAccepted),
+        ),
+        const SizedBox(height: 16),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _termsAccepted = !_termsAccepted),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               children: [
-                Container(
-                  width: 22,
-                  height: 22,
+                AnimatedContainer(
+                  duration: PharmacyMotion.fast,
+                  width: 20,
+                  height: 20,
                   decoration: BoxDecoration(
                     color: _termsAccepted
-                        ? AppTheme.primary
-                        : Colors.transparent,
+                        ? ModuleAccent.of(context).color
+                        : PharmacyColors.bg,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
+                      width: 1.5,
                       color: _termsAccepted
-                          ? AppTheme.primary
-                          : AppTheme.divider,
-                      width: 2,
+                          ? ModuleAccent.of(context).color
+                          : _err(3, 'terms') != null
+                          ? PharmacyColors.error
+                          : PharmacyColors.borderStrong,
                     ),
                   ),
                   child: _termsAccepted
-                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      ? const Icon(
+                          LucideIcons.check,
+                          size: 14,
+                          color: Colors.white,
+                        )
                       : null,
                 ),
                 const SizedBox(width: 12),
@@ -1128,26 +956,26 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   child: Text.rich(
                     TextSpan(
                       text: 'I agree to the ',
-                      style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        color: AppTheme.textSecondary,
+                      style: PharmacyType.sans(
+                        fontSize: PharmacyType.small,
+                        color: PharmacyColors.textSecondary,
                       ),
                       children: [
                         TextSpan(
                           text: 'Terms of Service',
-                          style: GoogleFonts.manrope(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.primary,
+                          style: PharmacyType.sans(
+                            fontSize: PharmacyType.small,
+                            fontWeight: FontWeight.w700,
+                            color: PharmacyColors.textStrong,
                           ),
                         ),
                         const TextSpan(text: ' and '),
                         TextSpan(
                           text: 'Privacy Policy',
-                          style: GoogleFonts.manrope(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.primary,
+                          style: PharmacyType.sans(
+                            fontSize: PharmacyType.small,
+                            fontWeight: FontWeight.w700,
+                            color: PharmacyColors.textStrong,
                           ),
                         ),
                       ],
@@ -1157,49 +985,160 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ],
             ),
           ),
-
-          const SizedBox(height: 24),
-
-          GradientButton(
-            text: 'Submit for Review',
-            icon: CupertinoIcons.paperplane,
-            onPressed: _termsAccepted ? _submitRegistration : () {},
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
+        ),
+        if (_err(3, 'terms') != null) _fieldError(_err(3, 'terms')!),
+      ],
     );
   }
 
-  Widget _buildInfoStep(String number, String text) {
-    return Row(
+  /// Clinic / video / home, each with a switch and its fee. Fee fields only
+  /// show for the types switched on, so a doctor who only sees patients at
+  /// the clinic isn't asked for fees they don't charge.
+  Widget _visitTypes(int step) {
+    Widget row({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+      required bool on,
+      required ValueChanged<bool>? onChanged,
+      required TextEditingController fee,
+      required String errorKey,
+    }) {
+      final accent = ModuleAccent.of(context);
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: on ? accent.veryLight : PharmacyColors.bg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 16,
+                    color: on ? accent.color : PharmacyColors.textTertiary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: PharmacyType.sans(
+                          fontSize: PharmacyType.body,
+                          fontWeight: FontWeight.w600,
+                          color: PharmacyColors.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: PharmacyType.sans(
+                          fontSize: PharmacyType.caption,
+                          color: PharmacyColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onChanged != null)
+                  PharmacySwitch(value: on, onChanged: onChanged)
+                else
+                  Text(
+                    'Required',
+                    style: PharmacyType.sans(
+                      fontSize: PharmacyType.caption,
+                      fontWeight: FontWeight.w600,
+                      color: PharmacyColors.textTertiary,
+                    ),
+                  ),
+              ],
+            ),
+            AnimatedSize(
+              duration: PharmacyMotion.fast,
+              child: on
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 10, left: 46),
+                      child: PharmacyTextField(
+                        label: 'Fee',
+                        controller: fee,
+                        icon: LucideIcons.indianRupee,
+                        hint: 'Per visit',
+                        isNum: true,
+                        required: true,
+                        dense: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(6),
+                        ],
+                        errorText: _err(step, errorKey),
+                        margin: EdgeInsets.zero,
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final doctor = _role == UserRole.doctor;
+    final error = _err(step, 'visitTypes');
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Text(
-              number,
-              style: GoogleFonts.manrope(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.primary,
-              ),
+        PharmacyGroup(
+          children: [
+            row(
+              icon: LucideIcons.building2,
+              title: doctor ? 'Clinic visit' : 'Clinic session',
+              subtitle: 'Patients come to you',
+              on: _offerClinic,
+              onChanged: (v) => setState(() => _offerClinic = v),
+              fee: _consultationFee,
+              errorKey: 'fee',
             ),
-          ),
+            const PharmacyHairline(),
+            row(
+              icon: LucideIcons.video,
+              title: 'Video consultation',
+              subtitle: 'Consult online from anywhere',
+              on: _offerVideo,
+              onChanged: (v) => setState(() => _offerVideo = v),
+              fee: _videoFee,
+              errorKey: 'videoFee',
+            ),
+            const PharmacyHairline(),
+            row(
+              icon: LucideIcons.house,
+              title: 'Home visit',
+              subtitle: _homeRequired
+                  ? 'Physiotherapists offer home sessions'
+                  : 'You visit the patient',
+              on: _homeOn,
+              onChanged: _homeRequired
+                  ? null
+                  : (v) => setState(() => _offerHome = v),
+              fee: _homeVisitFee,
+              errorKey: 'homeFee',
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Expanded(
+        if (error != null) _fieldError(error),
+        Padding(
+          padding: const EdgeInsets.only(top: 6, left: 2),
           child: Text(
-            text,
-            style: GoogleFonts.manrope(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
+            'You can change these any time in Practice settings.',
+            style: PharmacyType.sans(
+              fontSize: PharmacyType.caption,
+              color: PharmacyColors.textTertiary,
             ),
           ),
         ),
@@ -1207,17 +1146,132 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     );
   }
 
-  Widget _buildLabel(String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        label,
-        style: GoogleFonts.manrope(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppTheme.textPrimary,
-        ),
+  Widget _reviewGroup(
+    String title,
+    int step,
+    List<(String, String)> rows,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      PharmacySectionTitle(title, action: 'Edit', onAction: () => _goTo(step)),
+      PharmacyGroup(
+        children: [
+          for (final (i, r) in rows.indexed) ...[
+            if (i > 0) const PharmacyHairline(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 120,
+                    child: Text(
+                      r.$1,
+                      style: PharmacyType.sans(
+                        fontSize: PharmacyType.small,
+                        color: PharmacyColors.textTertiary,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      r.$2,
+                      textAlign: TextAlign.right,
+                      style: PharmacyType.sans(
+                        fontSize: PharmacyType.small,
+                        fontWeight: FontWeight.w600,
+                        color: PharmacyColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
+    ],
+  );
+
+  Widget _label(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: PharmacyType.sans(
+        fontSize: PharmacyType.caption,
+        fontWeight: FontWeight.w500,
+        color: PharmacyColors.textSecondary,
+      ),
+    ),
+  );
+
+  Widget _fieldError(String text) => Padding(
+    padding: const EdgeInsets.only(top: 4, left: 2),
+    child: Row(
+      children: [
+        const Icon(
+          LucideIcons.circleAlert,
+          size: 13,
+          color: PharmacyColors.error,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: PharmacyType.sans(
+            fontSize: PharmacyType.caption,
+            color: PharmacyColors.error,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A three-segment meter under the password. Advisory only — the server's
+/// rule is 6+ characters, enforced by the step's validation.
+class _PasswordStrength extends StatelessWidget {
+  final String password;
+  const _PasswordStrength({required this.password});
+
+  @override
+  Widget build(BuildContext context) {
+    if (password.isEmpty) return const SizedBox(height: 4);
+    var score = 0;
+    if (password.length >= 6) score++;
+    if (password.length >= 10) score++;
+    if (RegExp(r'\d').hasMatch(password) &&
+        RegExp(r'[A-Za-z]').hasMatch(password)) {
+      score++;
+    }
+    final (label, color) = switch (score) {
+      0 || 1 => ('Weak', PharmacyColors.error),
+      2 => ('Okay', PharmacyColors.warning),
+      _ => ('Strong', PharmacyColors.success),
+    };
+    return Row(
+      children: [
+        for (var i = 0; i < 3; i++)
+          Expanded(
+            child: AnimatedContainer(
+              duration: PharmacyMotion.fast,
+              height: 3,
+              margin: const EdgeInsets.only(right: 4),
+              decoration: BoxDecoration(
+                color: i < score ? color : PharmacyColors.panel,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: PharmacyType.sans(
+            fontSize: PharmacyType.micro,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }

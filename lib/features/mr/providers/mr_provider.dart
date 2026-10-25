@@ -98,7 +98,9 @@ class MrNotifier extends StateNotifier<MrState> {
     return const {};
   }
 
-  String get designation => '${state.profile['designation'] ?? state.dashboard['experience'] ?? 'MR'}'.toUpperCase();
+  String get designation =>
+      '${state.profile['designation'] ?? state.dashboard['experience'] ?? 'MR'}'
+          .toUpperCase();
 
   bool get isManager => const {'ABM', 'RBM', 'ZSM'}.contains(designation);
 
@@ -156,12 +158,16 @@ class MrNotifier extends StateNotifier<MrState> {
   }
 
   Future<void> loadAccounts({String? query, String? type}) async {
-    final res = await _api.getMrAccounts(queryParams: {
-      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
-      if (type != null && type.isNotEmpty) 'type': type,
-    });
+    final res = await _api.getMrAccounts(
+      queryParams: {
+        if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        if (type != null && type.isNotEmpty) 'type': type,
+      },
+    );
     final data = res.data;
-    state = state.copyWith(accounts: _list(data is Map ? data['accounts'] : null));
+    state = state.copyWith(
+      accounts: _list(data is Map ? data['accounts'] : null),
+    );
   }
 
   Future<void> loadVisits() async {
@@ -173,25 +179,33 @@ class MrNotifier extends StateNotifier<MrState> {
   Future<void> loadAttendance() async {
     final res = await _api.getMrAttendance();
     final data = res.data;
-    state = state.copyWith(attendance: _list(data is Map ? data['attendance'] : null));
+    state = state.copyWith(
+      attendance: _list(data is Map ? data['attendance'] : null),
+    );
   }
 
   Future<void> loadPlans() async {
     final res = await _api.getMrTourPlans();
     final data = res.data;
-    state = state.copyWith(tourPlans: _list(data is Map ? data['plans'] : null));
+    state = state.copyWith(
+      tourPlans: _list(data is Map ? data['plans'] : null),
+    );
   }
 
   Future<void> loadExpenses() async {
     final res = await _api.getMrExpenses();
     final data = res.data;
-    state = state.copyWith(expenses: _list(data is Map ? data['expenses'] : null));
+    state = state.copyWith(
+      expenses: _list(data is Map ? data['expenses'] : null),
+    );
   }
 
   Future<void> loadPob() async {
     final res = await _api.getMrPob();
     final data = res.data;
-    state = state.copyWith(pobOrders: _list(data is Map ? data['orders'] : null));
+    state = state.copyWith(
+      pobOrders: _list(data is Map ? data['orders'] : null),
+    );
   }
 
   Future<void> loadTeam() async {
@@ -203,7 +217,9 @@ class MrNotifier extends StateNotifier<MrState> {
   Future<void> loadTerritories() async {
     final res = await _api.getMrTerritories();
     final data = res.data;
-    state = state.copyWith(territories: _list(data is Map ? data['territories'] : null));
+    state = state.copyWith(
+      territories: _list(data is Map ? data['territories'] : null),
+    );
   }
 
   Future<void> loadTargets() async {
@@ -215,18 +231,26 @@ class MrNotifier extends StateNotifier<MrState> {
   Future<void> loadSamples() async {
     final res = await _api.getMrSamples();
     final data = res.data;
-    state = state.copyWith(sampleBalances: _list(data is Map ? data['balances'] : null));
+    state = state.copyWith(
+      sampleBalances: _list(data is Map ? data['balances'] : null),
+    );
   }
 
   Future<void> loadDetailing() async {
     final res = await _api.getMrDetailing();
     final data = res.data;
-    state = state.copyWith(detailing: _list(data is Map ? data['content'] : null));
+    state = state.copyWith(
+      detailing: _list(data is Map ? data['content'] : null),
+    );
   }
 
   Future<void> punchIn({String workType = 'field', String? notes}) async {
     final geo = await FieldLocationService.currentPayload();
-    await _api.mrPunchIn({...geo, 'workType': workType, if (notes != null) 'notes': notes});
+    await _api.mrPunchIn({
+      ...geo,
+      'workType': workType,
+      if (notes != null) 'notes': notes,
+    });
     await Future.wait([loadAttendance(), loadDashboard()]);
   }
 
@@ -272,14 +296,17 @@ class MrNotifier extends StateNotifier<MrState> {
   }
 
   Future<void> submitVisit(String visitId, {String? discussionNotes}) async {
-    await _api.mrVisitSubmit(
-      visitId,
-      {if (discussionNotes != null) 'discussionNotes': discussionNotes},
-    );
+    await _api.mrVisitSubmit(visitId, {
+      if (discussionNotes != null) 'discussionNotes': discussionNotes,
+    });
     await loadVisits();
   }
 
-  Future<void> reviewVisit(String visitId, String decision, {String? comment}) async {
+  Future<void> reviewVisit(
+    String visitId,
+    String decision, {
+    String? comment,
+  }) async {
     await _api.mrVisitReview(visitId, decision, comment: comment);
     await Future.wait([loadVisits(), loadDashboard()]);
   }
@@ -291,14 +318,19 @@ class MrNotifier extends StateNotifier<MrState> {
     required String objective,
   }) async {
     final own = state.tourPlans.cast<Map<String, dynamic>?>().firstWhere(
-          (row) => row?['month'] == month && _belongsToMe(row?['profileId']),
-          orElse: () => null,
-        );
+      (row) => row?['month'] == month && _belongsToMe(row?['profileId']),
+      orElse: () => null,
+    );
     final existingDays = _list(own?['days']);
-    final dateKey = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final dateKey =
+        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     existingDays.removeWhere((row) => '${row['date']}'.startsWith(dateKey));
     existingDays.add({
-      'date': DateTime(date.year, date.month, date.day).toUtc().toIso8601String(),
+      'date': DateTime(
+        date.year,
+        date.month,
+        date.day,
+      ).toUtc().toIso8601String(),
       'area': area,
       'objective': objective,
       'accountIds': const [],
@@ -321,7 +353,11 @@ class MrNotifier extends StateNotifier<MrState> {
     await loadPlans();
   }
 
-  Future<void> reviewTourPlan(String id, String decision, {String? comment}) async {
+  Future<void> reviewTourPlan(
+    String id,
+    String decision, {
+    String? comment,
+  }) async {
     await _api.reviewMrTourPlan(id, decision, comment: comment);
     await Future.wait([loadPlans(), loadDashboard()]);
   }
@@ -345,7 +381,11 @@ class MrNotifier extends StateNotifier<MrState> {
     await loadExpenses();
   }
 
-  Future<void> reviewExpense(String id, String decision, {String? comment}) async {
+  Future<void> reviewExpense(
+    String id,
+    String decision, {
+    String? comment,
+  }) async {
     await _api.reviewMrExpense(id, decision, comment: comment);
     await Future.wait([loadExpenses(), loadDashboard()]);
   }
@@ -360,7 +400,7 @@ class MrNotifier extends StateNotifier<MrState> {
     await _api.createMrPob({
       'accountId': accountId,
       'items': [
-        {'productName': productName, 'quantity': quantity, 'rate': rate}
+        {'productName': productName, 'quantity': quantity, 'rate': rate},
       ],
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
     });

@@ -12,6 +12,12 @@ class DashboardData {
   final List<Map<String, dynamic>> invoices;
   final List<Map<String, dynamic>> lowStockMedicines;
   final List<Map<String, dynamic>> expiringBatches;
+  final List<Map<String, dynamic>> expiredBatches;
+
+  /// Which of 'lowStock' / 'expiring' / 'expired' have finished loading at
+  /// least once — so an empty list before that shows a skeleton, not
+  /// "nothing here".
+  final Set<String> loadedAlerts;
   final Map<String, dynamic> earnings;
   final Map<String, dynamic> profile;
   final bool isLoading;
@@ -26,6 +32,8 @@ class DashboardData {
     this.invoices = const [],
     this.lowStockMedicines = const [],
     this.expiringBatches = const [],
+    this.expiredBatches = const [],
+    this.loadedAlerts = const {},
     this.earnings = const {},
     this.profile = const {},
     this.isLoading = false,
@@ -41,6 +49,8 @@ class DashboardData {
     List<Map<String, dynamic>>? invoices,
     List<Map<String, dynamic>>? lowStockMedicines,
     List<Map<String, dynamic>>? expiringBatches,
+    List<Map<String, dynamic>>? expiredBatches,
+    Set<String>? loadedAlerts,
     Map<String, dynamic>? earnings,
     Map<String, dynamic>? profile,
     bool? isLoading,
@@ -55,6 +65,8 @@ class DashboardData {
       invoices: invoices ?? this.invoices,
       lowStockMedicines: lowStockMedicines ?? this.lowStockMedicines,
       expiringBatches: expiringBatches ?? this.expiringBatches,
+      expiredBatches: expiredBatches ?? this.expiredBatches,
+      loadedAlerts: loadedAlerts ?? this.loadedAlerts,
       earnings: earnings ?? this.earnings,
       profile: profile ?? this.profile,
       isLoading: isLoading ?? this.isLoading,
@@ -638,7 +650,18 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
       currentStats['lowStockCount'] = list.length;
 
       state = state.copyWith(stats: currentStats, lowStockMedicines: list);
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _markAlertLoaded('lowStock');
+    }
+  }
+
+  void _markAlertLoaded(String key) {
+    if (!mounted || state.loadedAlerts.contains(key)) return;
+    state = state.copyWith(
+      loadedAlerts: {...state.loadedAlerts, key},
+      error: state.error,
+    );
   }
 
   Future<void> loadExpiring() async {
@@ -653,7 +676,29 @@ class PharmacyDashboardNotifier extends StateNotifier<DashboardData> {
       currentStats['expiringCount'] = list.length;
 
       state = state.copyWith(stats: currentStats, expiringBatches: list);
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _markAlertLoaded('expiring');
+    }
+  }
+
+  /// Batches already past expiry. `/medicine/expiring` only covers the next
+  /// 30 days, so the Expired tab needs its own endpoint. It returns a bare
+  /// list of medicine-shaped rows (one per batch) with `batch_number`,
+  /// `expiry_date` and `quantity` alongside the medicine's own fields.
+  Future<void> loadExpired() async {
+    try {
+      final response = await _api.getExpiredMedicines();
+      final list = _extractList(response.data);
+
+      final currentStats = Map<String, dynamic>.from(state.stats);
+      currentStats['expiredCount'] = list.length;
+
+      state = state.copyWith(stats: currentStats, expiredBatches: list);
+    } catch (_) {
+    } finally {
+      _markAlertLoaded('expired');
+    }
   }
 
   Future<void> loadEarnings() async {

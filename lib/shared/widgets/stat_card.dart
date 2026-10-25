@@ -82,7 +82,9 @@ class StatCard extends StatelessWidget {
                 style: GoogleFonts.manrope(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color: change!.startsWith('+') ? AppTheme.success : AppTheme.error,
+                  color: change!.startsWith('+')
+                      ? AppTheme.success
+                      : AppTheme.error,
                 ),
               ),
             ],

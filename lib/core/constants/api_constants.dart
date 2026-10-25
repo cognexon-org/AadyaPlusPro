@@ -23,7 +23,7 @@ class ApiConstants {
     // Local backend for testing — your PC's LAN IP on port 5000. Works from
     // Android/iOS emulators, physical devices on the same Wi-Fi, and Flutter
     // web, without needing a different value per target.
-    return 'http://192.168.29.101:5000/api';
+    return 'http://16.176.130.55/api';
   }
 
   static String get socketBaseUrl {
@@ -85,6 +85,26 @@ class ApiConstants {
   static String physioExercisePlan(String id) => '/physio-exercises/plans/$id';
   static String physioExercisePlanProgress(String id) =>
       '/physio-exercises/plans/$id/progress';
+  static String physioExercisePlanAdherence(String id) =>
+      '/physio-exercises/plans/$id/adherence';
+
+  // Physio care: treatment packages & courses, assessments, progress.
+  static const physioPackages = '/physio-care/me/packages';
+  static String physioPackage(String id) => '/physio-care/me/packages/$id';
+  static const physioCourses = '/physio-care/me/courses';
+  static String physioCourse(String id) => '/physio-care/me/courses/$id';
+  static String physioPatientCourses(String patientId) =>
+      '/physio-care/me/patients/$patientId/courses';
+  static String physioCourseLinkAppointment(
+    String courseId,
+    String appointmentId,
+  ) => '/physio-care/me/courses/$courseId/appointments/$appointmentId';
+  static String physioPatientAssessments(String patientId) =>
+      '/physio-care/me/patients/$patientId/assessments';
+  static String physioAssessment(String id) =>
+      '/physio-care/me/assessments/$id';
+  static String physioPatientProgress(String patientId) =>
+      '/physio-care/me/patients/$patientId/progress';
 
   // PATHOLOGY COMPATIBILITY
   static const pathologyProfile = '/pathology/me/profile';
@@ -114,6 +134,17 @@ class ApiConstants {
       '/diagnostics/merchant/orders/$id/payment';
   static String diagnosticsReportUpload(String id) =>
       '/diagnostics/merchant/orders/$id/report';
+  static String diagnosticsResults(String id) =>
+      '/diagnostics/merchant/orders/$id/results';
+  static String diagnosticsRelease(String id) =>
+      '/diagnostics/merchant/orders/$id/release';
+  static String diagnosticsReportFile(String id) =>
+      '/diagnostics/orders/$id/report';
+  static const diagnosticsEarnings = '/diagnostics/merchant/earnings';
+  static const diagnosticsSchedule = '/diagnostics/merchant/schedule';
+  static const diagnosticsHolidays = '/diagnostics/merchant/schedule/holidays';
+  static const diagnosticsLibrary = '/diagnostics/merchant/catalog/library';
+  static const diagnosticsImport = '/diagnostics/merchant/catalog/import';
   static const diagnosticsStaff = '/diagnostics/merchant/staff';
   static String diagnosticsStaffById(String id) =>
       '/diagnostics/merchant/staff/$id';
@@ -137,6 +168,9 @@ class ApiConstants {
   static const medicines = '/medicine';
   static const lowStockMedicines = '/medicine/low-stock';
   static const expiringMedicines = '/medicine/expiring';
+  static const expiredMedicines = '/medicine/expired';
+  static String medicineByBarcode(String code) =>
+      '/medicine/barcode/${Uri.encodeComponent(code)}';
   static const batches = '/batch';
   static const suppliers = '/supplier';
   static const purchaseOrders = '/purchase-order';
@@ -193,6 +227,15 @@ class ApiConstants {
       '/epharmacy/merchant/orders/$id/cancel';
   static String merchantRefundOrder(String id) =>
       '/epharmacy/merchant/orders/$id/refund';
+  static String merchantOrderInvoicePdf(String id) =>
+      '/epharmacy/merchant/orders/$id/invoice.pdf';
+  static String merchantOrderPackingSlipPdf(String id) =>
+      '/epharmacy/merchant/orders/$id/packing-slip.pdf';
+  static String merchantOrderSubstitutes(String id) =>
+      '/epharmacy/merchant/orders/$id/substitutes';
+  static const merchantDrivers = '/epharmacy/merchant/drivers';
+  static const merchantScheduleRegister =
+      '/epharmacy/merchant/schedule-register';
   static const merchantCoupons = '/epharmacy/merchant/coupons';
   static String merchantCoupon(String id) => '/epharmacy/merchant/coupons/$id';
   static const merchantSettings = '/epharmacy/merchant/settings';

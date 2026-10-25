@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/pharmacy_type.dart';
 import '../../../core/network/api_service.dart';
@@ -118,7 +118,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
             Text(
               'Create Transfer',
               style: PharmacyType.sans(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: PharmacyColors.textPrimary,
               ),
@@ -132,7 +132,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                     PharmacyDropdownField<String>(
                       label: 'To Branch',
                       value: dest,
-                      icon: Icons.storefront_outlined,
+                      icon: LucideIcons.store,
                       items: destinations
                           .map(
                             (s) => DropdownMenuItem(
@@ -146,7 +146,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                     PharmacyDropdownField<String>(
                       label: 'Medicine',
                       value: med,
-                      icon: Icons.medication_outlined,
+                      icon: LucideIcons.pill,
                       items: _medicines
                           .map(
                             (m) => DropdownMenuItem(
@@ -160,7 +160,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                     PharmacyTextField(
                       label: 'Quantity',
                       controller: qty,
-                      icon: CupertinoIcons.number,
+                      icon: LucideIcons.hash,
                       isNum: true,
                       margin: EdgeInsets.zero,
                     ),
@@ -269,7 +269,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
             Text(
               'Create Sale Return',
               style: PharmacyType.sans(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: PharmacyColors.textPrimary,
               ),
@@ -283,7 +283,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                     PharmacyDropdownField<String>(
                       label: 'Select Sale',
                       value: '${sale['_id']}',
-                      icon: Icons.receipt_long_outlined,
+                      icon: LucideIcons.receiptText,
                       items: eligible
                           .map(
                             (s) => DropdownMenuItem(
@@ -303,13 +303,13 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                     PharmacyTextField(
                       label: 'Return Quantity',
                       controller: qty,
-                      icon: CupertinoIcons.number,
+                      icon: LucideIcons.hash,
                       isNum: true,
                     ),
                     PharmacyTextField(
                       label: 'Reason',
                       controller: reason,
-                      icon: CupertinoIcons.doc_text,
+                      icon: LucideIcons.fileText,
                     ),
                     PharmacySwitchRow(
                       label: 'Restockable',
@@ -396,7 +396,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
         title: Text(
           'Transfers & Returns',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
@@ -407,11 +407,11 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
           unselectedLabelColor: PharmacyColors.textSecondary,
           indicatorColor: PharmacyColors.green,
           labelStyle: PharmacyType.sans(
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: FontWeight.w600,
           ),
           unselectedLabelStyle: PharmacyType.sans(
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: FontWeight.w500,
           ),
           tabs: const [
@@ -427,7 +427,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
               backgroundColor: PharmacyColors.green,
               elevation: 2,
               onPressed: () => _tabs.index == 1 ? _newReturn() : _newTransfer(),
-              child: const Icon(CupertinoIcons.add, color: Colors.white),
+              child: const Icon(LucideIcons.plus, color: Colors.white),
             ),
       body: SafeArea(
         // An AppBar already covers the status bar; this is here for
@@ -461,7 +461,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
       children: _transfers.isEmpty
           ? const [
               PharmacyEmptyStateInline(
-                icon: CupertinoIcons.arrow_2_circlepath,
+                icon: LucideIcons.refreshCw,
                 text: 'No stock transfers',
               ),
             ]
@@ -483,7 +483,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                             '${t['transferNumber'] ?? 'Transfer'}',
                             style: PharmacyType.sans(
                               fontWeight: FontWeight.w600,
-                              fontSize: 13.5,
+                              fontSize: 13,
                               color: PharmacyColors.textPrimary,
                             ),
                           ),
@@ -545,7 +545,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
       children: _returns.isEmpty
           ? const [
               PharmacyEmptyStateInline(
-                icon: CupertinoIcons.arrow_uturn_left,
+                icon: LucideIcons.undo2,
                 text: 'No returns',
               ),
             ]
@@ -562,7 +562,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                                 '${r['returnNumber'] ?? 'Return'}',
                                 style: PharmacyType.sans(
                                   fontWeight: FontWeight.w600,
-                                  fontSize: 13.5,
+                                  fontSize: 13,
                                   color: PharmacyColors.textPrimary,
                                 ),
                               ),
@@ -576,9 +576,9 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                           ),
                         ),
                         Text(
-                          '₹${r['totalRefund'] ?? 0}',
+                          pharmacyRupees(r['totalRefund']),
                           style: PharmacyType.sans(
-                            fontSize: 13.5,
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: PharmacyColors.error,
                           ),
@@ -612,12 +612,12 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
             children: [
               PharmacyMetricTile(
                 label: 'Cost',
-                value: '₹${totals['costValue'] ?? 0}',
+                value: pharmacyRupees(totals['costValue']),
                 color: PharmacyColors.green,
               ),
               PharmacyMetricTile(
                 label: 'Retail',
-                value: '₹${totals['retailValue'] ?? 0}',
+                value: pharmacyRupees(totals['retailValue']),
                 color: PharmacyColors.success,
               ),
               PharmacyMetricTile(
@@ -626,7 +626,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
               ),
               PharmacyMetricTile(
                 label: 'Expired cost',
-                value: '₹${totals['expiredCostValue'] ?? 0}',
+                value: pharmacyRupees(totals['expiredCostValue']),
                 color: PharmacyColors.error,
               ),
             ],
@@ -646,7 +646,7 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                               '${r['medicineName'] ?? 'Medicine'}',
                               style: PharmacyType.sans(
                                 fontWeight: FontWeight.w600,
-                                fontSize: 13.5,
+                                fontSize: 13,
                                 color: PharmacyColors.textPrimary,
                               ),
                             ),
@@ -662,9 +662,9 @@ class _PharmacyInventoryOpsState extends ConsumerState<PharmacyInventoryOps>
                         ),
                       ),
                       Text(
-                        '₹${r['costValue'] ?? 0}',
+                        pharmacyRupees(r['costValue']),
                         style: PharmacyType.sans(
-                          fontSize: 13.5,
+                          fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: PharmacyColors.textPrimary,
                         ),

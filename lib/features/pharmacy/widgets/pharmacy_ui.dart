@@ -1,10 +1,16 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import '../theme/pharmacy_type.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../theme/pharmacy_colors.dart';
+import 'module_accent.dart';
+import 'pharmacy_motion.dart';
+
+export 'module_accent.dart';
+export 'pharmacy_motion.dart';
 
 /// Shared visual language for every pharmacy screen, built to the Pharmacy
 /// Module Master UI Design System: iOS-native, restrained, information-dense.
@@ -43,6 +49,18 @@ const kMedicineCategoryIcons = <String, IconData>{
 
 IconData medicineCategoryIcon(String? category) {
   return kMedicineCategoryIcons[category?.toLowerCase()] ?? LucideIcons.pill;
+}
+
+/// "Selling Price (₹)" → "Selling price (₹)". Field labels are sentence
+/// case in the minimal style; words in capitals (GSTIN, UPI, MRP) are kept.
+String pharmacyFieldLabel(String label) {
+  final words = label.split(' ');
+  return [
+    for (var i = 0; i < words.length; i++)
+      i == 0 || words[i].length < 2 || words[i] == words[i].toUpperCase()
+          ? words[i]
+          : '${words[i][0].toLowerCase()}${words[i].substring(1)}',
+  ].join(' ');
 }
 
 TextStyle _inter({
@@ -85,29 +103,30 @@ class PharmacyScreenHeader extends StatelessWidget {
               Text(
                 title,
                 style: _inter(
-                  size: 20,
-                  weight: FontWeight.w600,
-                  color: PharmacyColors.textPrimary,
+                  size: 17,
+                  weight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                  color: PharmacyColors.textStrong,
                 ),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 2),
                 Text(
                   subtitle!,
-                  style: _inter(size: 12, color: PharmacyColors.textSecondary),
+                  style: _inter(
+                    size: 11.5,
+                    weight: FontWeight.w500,
+                    color: PharmacyColors.textSecondary,
+                  ),
                 ),
               ],
             ],
           ),
         ),
         if (trailing != null) ...[
+          // The notification bell now floats over Home only, so a trailing
+          // action can sit at the edge on every screen that uses this header.
           trailing!,
-          // The dashboard shell floats a 46px notification bell at
-          // (top: 12, right: 12) over every tab screen, and this header is
-          // only ever used on tab screens. Without this gap a trailing
-          // action lands underneath the bell — invisible, and un-tappable
-          // because the bell swallows the hit test.
-          const SizedBox(width: 44),
         ],
       ],
     );
@@ -137,10 +156,10 @@ class PharmacyCard extends StatelessWidget {
     final card = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: PharmacyColors.card,
+        color: PharmacyColors.panel,
         borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
-        border: Border.all(color: borderColor ?? PharmacyColors.border),
-        boxShadow: PharmacyColors.shadowDefault,
+        // A border only when a caller asks for one (e.g. a warning card).
+        border: borderColor == null ? null : Border.all(color: borderColor!),
       ),
       child: child,
     );
@@ -148,17 +167,7 @@ class PharmacyCard extends StatelessWidget {
       padding: margin,
       child: onTap == null
           ? card
-          : Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
-                onTap: onTap,
-                splashColor: PharmacyColors.green.withValues(alpha: 0.05),
-                highlightColor: PharmacyColors.green.withValues(alpha: 0.03),
-                child: card,
-              ),
-            ),
+          : PharmacyPressable(scale: 0.985, onTap: onTap, child: card),
     );
   }
 }
@@ -229,10 +238,8 @@ class PharmacyMetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: PharmacyColors.card,
-        borderRadius: BorderRadius.circular(PharmacyColors.radiusCardLarge),
-        border: Border.all(color: PharmacyColors.border),
-        boxShadow: PharmacyColors.shadowDefault,
+        color: PharmacyColors.panel,
+        borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,7 +257,7 @@ class PharmacyMetricTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: _inter(
-                    size: 11,
+                    size: 11.5,
                     weight: FontWeight.w500,
                     color: PharmacyColors.textSecondary,
                   ),
@@ -273,10 +280,10 @@ class PharmacyMetricTile extends StatelessWidget {
                     value,
                     maxLines: 1,
                     style: _inter(
-                      size: compact ? 16 : 22,
+                      size: compact ? 15 : 17,
                       weight: FontWeight.w700,
-                      color: PharmacyColors.textPrimary,
-                      letterSpacing: -0.3,
+                      color: PharmacyColors.textStrong,
+                      letterSpacing: -0.4,
                     ),
                   ),
                 ),
@@ -289,9 +296,7 @@ class PharmacyMetricTile extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        trendUp
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
+                        trendUp ? LucideIcons.arrowUp : LucideIcons.arrowDown,
                         size: 11,
                         color: trendUp
                             ? PharmacyColors.success
@@ -324,9 +329,8 @@ class PharmacyMetricTile extends StatelessWidget {
 /// New Sale. Every one of those was its own near-identical copy; they are all
 /// this now, so the selected state cannot drift between screens again.
 ///
-/// Selected reads as a solid green chip with white text, using the same
-/// [PharmacyColors.green] fill as the module's primary buttons so a selected
-/// chip and a button read as the same green.
+/// Selected reads as an ink-dark chip with white text — a selected filter is
+/// a state, not an action, so it doesn't take the module accent.
 class PharmacyFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
@@ -349,35 +353,32 @@ class PharmacyFilterChip extends StatelessWidget {
     final radius = BorderRadius.circular(
       block ? PharmacyColors.radiusInput : 20,
     );
-    return Material(
-      color: selected ? PharmacyColors.green : PharmacyColors.card,
-      borderRadius: radius,
-      child: InkWell(
-        borderRadius: radius,
-        onTap: onTap,
-        child: Container(
-          padding: block
-              ? const EdgeInsets.symmetric(vertical: 10)
-              : const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          alignment: block ? Alignment.center : null,
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(
-              color: selected
-                  ? PharmacyColors.green
-                  : PharmacyColors.borderStrong,
-            ),
+    // Colour, border and shadow all cross-fade, so moving the selection
+    // reads as one chip handing over to the next rather than two snapping.
+    return PharmacyPressable(
+      scale: 0.95,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: PharmacyMotion.medium,
+        curve: PharmacyMotion.enter,
+        padding: block
+            ? const EdgeInsets.symmetric(vertical: 10)
+            : const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        alignment: block ? Alignment.center : null,
+        decoration: BoxDecoration(
+          // Minimal style: a selected filter is a state, not an action, so it
+          // is ink-dark rather than brand green; unselected is the grey panel.
+          color: selected ? PharmacyColors.textStrong : PharmacyColors.panel,
+          borderRadius: radius,
+        ),
+        child: AnimatedDefaultTextStyle(
+          duration: PharmacyMotion.medium,
+          style: PharmacyType.sans(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : PharmacyColors.textSecondary,
           ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: PharmacyType.sans(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : PharmacyColors.textSecondary,
-            ),
-          ),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ),
     );
@@ -402,9 +403,10 @@ class PharmacyStatusPill extends StatelessWidget {
 
   /// Builds a pill directly from a backend order-status key using the
   /// design system's exact per-status color table.
-  factory PharmacyStatusPill.status(String status, {String? label}) {
+  factory PharmacyStatusPill.status(String status, {String? label, Key? key}) {
     final (bg, fg) = PharmacyColors.statusColors(status);
     return PharmacyStatusPill(
+      key: key,
       text: label ?? status.replaceAll('_', ' '),
       color: fg,
       background: bg,
@@ -428,7 +430,7 @@ class PharmacyStatusPill extends StatelessWidget {
           ],
           Text(
             text,
-            style: _inter(size: 11, weight: FontWeight.w600, color: color),
+            style: _inter(size: 11.5, weight: FontWeight.w600, color: color),
           ),
         ],
       ),
@@ -468,6 +470,28 @@ String pharmacyErrorMessage(Object? error, {required String fallback}) {
   return fallback;
 }
 
+final _pharmacyInr = NumberFormat.currency(
+  locale: 'en_IN',
+  symbol: '₹',
+  decimalDigits: 0,
+);
+final _pharmacyInrPaise = NumberFormat.currency(
+  locale: 'en_IN',
+  symbol: '₹',
+  decimalDigits: 2,
+);
+
+/// A money figure in Indian grouping (₹12,68,500). Paise are shown only when
+/// there are some — a ₹12.50 strip price must not round to ₹13, but a ₹450
+/// order total should not read ₹450.00. For screens that printed raw values
+/// like `₹${item['sellingPrice']}`, which gave ₹1268500 or ₹12.5.
+String pharmacyRupees(dynamic value) {
+  final n = num.tryParse('${value ?? ''}') ?? 0;
+  return n == n.roundToDouble()
+      ? _pharmacyInr.format(n)
+      : _pharmacyInrPaise.format(n);
+}
+
 /// The module's error toast. Capped at three lines so a long server message
 /// cannot take over the screen.
 void showPharmacyError(
@@ -483,7 +507,7 @@ void showPharmacyError(
         pharmacyErrorMessage(error, fallback: fallback),
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
-        style: _inter(size: 12.5, color: Colors.white),
+        style: _inter(size: 11.5, color: Colors.white),
       ),
       backgroundColor: PharmacyColors.error,
       behavior: SnackBarBehavior.floating,
@@ -706,13 +730,13 @@ class PharmacyLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: SizedBox(
         width: 22,
         height: 22,
         child: CircularProgressIndicator(
           strokeWidth: 2.5,
-          color: PharmacyColors.green,
+          color: ModuleAccent.of(context).color,
         ),
       ),
     );
@@ -732,14 +756,13 @@ class PharmacyErrorBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: PharmacyColors.errorBg,
+        color: PharmacyColors.panel,
         borderRadius: BorderRadius.circular(PharmacyColors.radiusCard),
-        border: Border.all(color: PharmacyColors.error.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
           const Icon(
-            CupertinoIcons.exclamationmark_triangle,
+            LucideIcons.circleAlert,
             size: 18,
             color: PharmacyColors.error,
           ),
@@ -747,7 +770,7 @@ class PharmacyErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: _inter(size: 12.5, color: PharmacyColors.error),
+              style: _inter(size: 11.5, color: PharmacyColors.error),
             ),
           ),
           if (onRetry != null)
@@ -756,7 +779,7 @@ class PharmacyErrorBanner extends StatelessWidget {
               child: Text(
                 'Retry',
                 style: _inter(
-                  size: 12.5,
+                  size: 11.5,
                   weight: FontWeight.w600,
                   color: PharmacyColors.error,
                 ),
@@ -786,21 +809,30 @@ class PharmacyEmptyStateInline extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
       decoration: BoxDecoration(
-        color: PharmacyColors.card,
-        borderRadius: BorderRadius.circular(PharmacyColors.radiusCardLarge),
-        border: Border.all(color: PharmacyColors.border),
+        color: PharmacyColors.panel,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 30, color: PharmacyColors.textTertiary),
+          PharmacyFloat(
+            child: Container(
+              width: 56,
+              height: 56,
+              decoration: const BoxDecoration(
+                color: PharmacyColors.bg,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 24, color: PharmacyColors.textSecondary),
+            ),
+          ),
           const SizedBox(height: 14),
           Text(
             text,
             style: _inter(
-              size: 13,
+              size: 12.5,
               color: PharmacyColors.textSecondary,
               height: 1.4,
             ),
@@ -831,6 +863,25 @@ class PharmacyTextField extends StatelessWidget {
   /// 48px-tall field turns the screen into a scroll marathon.
   final bool dense;
 
+  final List<TextInputFormatter>? inputFormatters;
+  final TextCapitalization textCapitalization;
+
+  /// A widget at the field's right edge — e.g. a scan button.
+  final Widget? trailing;
+
+  final bool obscureText;
+  final bool readOnly;
+
+  /// Overrides the keyboard chosen from [isNum]/[isDecimal] (email, phone).
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
+  final Iterable<String>? autofillHints;
+
+  /// Shown under the field in red, and outlines it — for a value the user
+  /// has to fix before going on.
+  final String? errorText;
+
   const PharmacyTextField({
     super.key,
     required this.label,
@@ -843,6 +894,16 @@ class PharmacyTextField extends StatelessWidget {
     this.required = false,
     this.margin = const EdgeInsets.only(bottom: 16),
     this.dense = false,
+    this.inputFormatters,
+    this.textCapitalization = TextCapitalization.none,
+    this.trailing,
+    this.obscureText = false,
+    this.readOnly = false,
+    this.keyboardType,
+    this.textInputAction,
+    this.onSubmitted,
+    this.autofillHints,
+    this.errorText,
   });
 
   @override
@@ -852,37 +913,58 @@ class PharmacyTextField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            required ? '$label *' : label,
-            style: _inter(
-              size: dense ? 11.5 : 12.5,
-              weight: FontWeight.w500,
-              color: PharmacyColors.textSecondary,
+          if (label.isNotEmpty)
+            Text(
+              required
+                  ? '${pharmacyFieldLabel(label)} *'
+                  : pharmacyFieldLabel(label),
+              style: _inter(
+                size: dense ? 11.5 : 11.5,
+                weight: FontWeight.w500,
+                color: PharmacyColors.textSecondary,
+              ),
             ),
-          ),
-          SizedBox(height: dense ? 5 : 6),
+          if (label.isNotEmpty) SizedBox(height: dense ? 5 : 6),
           TextField(
             controller: controller,
-            maxLines: maxLines,
-            keyboardType: isDecimal
-                ? const TextInputType.numberWithOptions(decimal: true)
-                : isNum
-                ? TextInputType.number
-                : TextInputType.text,
-            style: _inter(size: dense ? 13.5 : 14),
-            cursorColor: PharmacyColors.green,
+            maxLines: obscureText ? 1 : maxLines,
+            obscureText: obscureText,
+            readOnly: readOnly,
+            textInputAction: textInputAction,
+            onSubmitted: onSubmitted,
+            autofillHints: autofillHints,
+            inputFormatters: inputFormatters,
+            textCapitalization: textCapitalization,
+            keyboardType:
+                keyboardType ??
+                (isDecimal
+                    ? const TextInputType.numberWithOptions(decimal: true)
+                    : isNum
+                    ? TextInputType.number
+                    : TextInputType.text),
+            style: _inter(
+              size: 13,
+              color: readOnly
+                  ? PharmacyColors.textSecondary
+                  : PharmacyColors.textPrimary,
+            ),
+            cursorColor: ModuleAccent.of(context).color,
             decoration: InputDecoration(
               hintText: hint,
+              errorText: errorText,
+              errorMaxLines: 2,
+              errorStyle: _inter(size: 11, color: PharmacyColors.error),
               hintStyle: _inter(
-                size: dense ? 12.5 : 13,
+                size: dense ? 12.5 : 12.5,
                 color: PharmacyColors.textTertiary,
               ),
               isDense: true,
               filled: true,
-              fillColor: PharmacyColors.card,
+              fillColor: PharmacyColors.panel,
+              suffixIcon: trailing,
               contentPadding: EdgeInsets.symmetric(
                 horizontal: dense ? 12 : 14,
-                vertical: maxLines > 1 ? (dense ? 10 : 13) : (dense ? 11 : 14),
+                vertical: maxLines > 1 ? (dense ? 10 : 12) : (dense ? 10 : 12),
               ),
               prefixIconConstraints: dense
                   ? const BoxConstraints(minWidth: 38, minHeight: 0)
@@ -896,22 +978,29 @@ class PharmacyTextField extends StatelessWidget {
                     ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(color: PharmacyColors.border),
+                borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(color: PharmacyColors.border),
+                borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(
-                  color: PharmacyColors.green,
+                borderSide: BorderSide(
+                  color: ModuleAccent.of(context).color,
                   width: 1.5,
                 ),
               ),
               errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
                 borderSide: const BorderSide(color: PharmacyColors.error),
+              ),
+              focusedErrorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
+                borderSide: const BorderSide(
+                  color: PharmacyColors.error,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -948,9 +1037,9 @@ class PharmacyDropdownField<T> extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
+            pharmacyFieldLabel(label),
             style: _inter(
-              size: 12.5,
+              size: 11.5,
               weight: FontWeight.w500,
               color: PharmacyColors.textSecondary,
             ),
@@ -958,37 +1047,40 @@ class PharmacyDropdownField<T> extends StatelessWidget {
           const SizedBox(height: 6),
           DropdownButtonFormField<T>(
             initialValue: value,
+            // Fills the field so a long item ellipsises instead of
+            // overflowing a half-width field.
+            isExpanded: true,
             items: items,
             onChanged: onChanged,
-            style: _inter(size: 14, color: PharmacyColors.textPrimary),
+            style: _inter(size: 13, color: PharmacyColors.textPrimary),
             icon: const Icon(
-              CupertinoIcons.chevron_down,
+              LucideIcons.chevronDown,
               size: 16,
               color: PharmacyColors.textTertiary,
             ),
             decoration: InputDecoration(
               isDense: true,
               filled: true,
-              fillColor: PharmacyColors.card,
+              fillColor: PharmacyColors.panel,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
-                vertical: 14,
+                vertical: 12,
               ),
               prefixIcon: icon == null
                   ? null
                   : Icon(icon, size: 18, color: PharmacyColors.textTertiary),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(color: PharmacyColors.border),
+                borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(color: PharmacyColors.border),
+                borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-                borderSide: const BorderSide(
-                  color: PharmacyColors.green,
+                borderSide: BorderSide(
+                  color: ModuleAccent.of(context).color,
                   width: 1.5,
                 ),
               ),
@@ -1023,7 +1115,10 @@ class PharmacySwitch extends StatelessWidget {
         value: value,
         onChanged: onChanged,
         activeThumbColor: Colors.white,
-        activeTrackColor: PharmacyColors.green,
+        activeTrackColor: ModuleAccent.of(context).color,
+        inactiveThumbColor: Colors.white,
+        inactiveTrackColor: PharmacyColors.borderStrong,
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
@@ -1079,9 +1174,9 @@ class PharmacySwitchRow extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          label,
+                          pharmacyFieldLabel(label),
                           style: _inter(
-                            size: 13.5,
+                            size: 13,
                             weight: FontWeight.w500,
                             color: PharmacyColors.textPrimary,
                           ),
@@ -1090,7 +1185,7 @@ class PharmacySwitchRow extends StatelessWidget {
                           Text(
                             subtitle!,
                             style: _inter(
-                              size: 11,
+                              size: 11.5,
                               color: PharmacyColors.textSecondary,
                             ),
                           ),
@@ -1127,7 +1222,7 @@ class PharmacyPickerField extends StatelessWidget {
     required this.label,
     required this.valueText,
     required this.onTap,
-    this.icon = CupertinoIcons.calendar,
+    this.icon = LucideIcons.calendar,
     this.required = false,
     this.margin = const EdgeInsets.only(bottom: 16),
   });
@@ -1140,9 +1235,11 @@ class PharmacyPickerField extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            required ? '$label *' : label,
+            required
+                ? '${pharmacyFieldLabel(label)} *'
+                : pharmacyFieldLabel(label),
             style: _inter(
-              size: 12.5,
+              size: 11.5,
               weight: FontWeight.w500,
               color: PharmacyColors.textSecondary,
             ),
@@ -1157,14 +1254,13 @@ class PharmacyPickerField extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
-                  vertical: 14,
+                  vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: PharmacyColors.card,
+                  color: PharmacyColors.panel,
                   borderRadius: BorderRadius.circular(
                     PharmacyColors.radiusInput,
                   ),
-                  border: Border.all(color: PharmacyColors.border),
                 ),
                 child: Row(
                   children: [
@@ -1174,7 +1270,7 @@ class PharmacyPickerField extends StatelessWidget {
                       child: Text(
                         valueText,
                         style: _inter(
-                          size: 14,
+                          size: 13,
                           color: PharmacyColors.textPrimary,
                         ),
                       ),
@@ -1195,6 +1291,10 @@ class PharmacySearchField extends StatelessWidget {
   final String hint;
   final VoidCallback? onSubmitted;
   final VoidCallback? onRefresh;
+  final ValueChanged<String>? onChanged;
+
+  /// Shows a barcode button inside the field when set.
+  final VoidCallback? onScan;
 
   const PharmacySearchField({
     super.key,
@@ -1202,6 +1302,8 @@ class PharmacySearchField extends StatelessWidget {
     required this.hint,
     this.onSubmitted,
     this.onRefresh,
+    this.onChanged,
+    this.onScan,
   });
 
   @override
@@ -1210,24 +1312,35 @@ class PharmacySearchField extends StatelessWidget {
       controller: controller,
       textInputAction: TextInputAction.search,
       onSubmitted: (_) => onSubmitted?.call(),
-      style: _inter(size: 13.5),
+      onChanged: onChanged,
+      style: _inter(size: 13),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: _inter(size: 13, color: PharmacyColors.textTertiary),
+        hintStyle: _inter(size: 12.5, color: PharmacyColors.textTertiary),
         filled: true,
-        fillColor: PharmacyColors.card,
+        fillColor: PharmacyColors.panel,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 13),
         prefixIcon: const Icon(
-          CupertinoIcons.search,
+          LucideIcons.search,
           size: 18,
           color: PharmacyColors.textTertiary,
         ),
-        suffixIcon: onRefresh == null
+        suffixIcon: onScan != null
+            ? IconButton(
+                tooltip: 'Scan barcode',
+                icon: Icon(
+                  LucideIcons.scanBarcode,
+                  size: 20,
+                  color: ModuleAccent.of(context).color,
+                ),
+                onPressed: onScan,
+              )
+            : onRefresh == null
             ? null
             : IconButton(
                 icon: const Icon(
-                  CupertinoIcons.refresh,
+                  LucideIcons.refreshCw,
                   size: 18,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -1235,15 +1348,18 @@ class PharmacySearchField extends StatelessWidget {
               ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-          borderSide: const BorderSide(color: PharmacyColors.border),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-          borderSide: const BorderSide(color: PharmacyColors.border),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-          borderSide: const BorderSide(color: PharmacyColors.green, width: 1.5),
+          borderSide: BorderSide(
+            color: ModuleAccent.of(context).color,
+            width: 1.5,
+          ),
         ),
       ),
     );
@@ -1258,6 +1374,10 @@ class PharmacyButton extends StatelessWidget {
   final bool loading;
   final bool fullWidth;
 
+  /// 40px instead of 46px — for a button inside a card or list row, where a
+  /// full-height button outweighs the content around it.
+  final bool compact;
+
   const PharmacyButton({
     super.key,
     required this.label,
@@ -1265,6 +1385,7 @@ class PharmacyButton extends StatelessWidget {
     required this.onPressed,
     this.loading = false,
     this.fullWidth = true,
+    this.compact = false,
   });
 
   @override
@@ -1272,10 +1393,13 @@ class PharmacyButton extends StatelessWidget {
     final child = FilledButton(
       onPressed: loading ? null : onPressed,
       style: FilledButton.styleFrom(
-        backgroundColor: PharmacyColors.green,
-        disabledBackgroundColor: PharmacyColors.green.withValues(alpha: 0.4),
+        backgroundColor: ModuleAccent.of(context).color,
+        disabledBackgroundColor: ModuleAccent.of(
+          context,
+        ).color.withValues(alpha: 0.4),
         foregroundColor: Colors.white,
-        minimumSize: const Size(0, 48),
+        minimumSize: Size(0, compact ? 40 : 46),
+        padding: compact ? const EdgeInsets.symmetric(horizontal: 16) : null,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(PharmacyColors.radiusButton),
         ),
@@ -1307,7 +1431,7 @@ class PharmacyButton extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                     style: _inter(
-                      size: 14,
+                      size: 13,
                       weight: FontWeight.w600,
                       color: Colors.white,
                     ),
@@ -1326,7 +1450,7 @@ class PharmacySecondaryButton extends StatelessWidget {
   final IconData? icon;
   final VoidCallback? onPressed;
   final bool fullWidth;
-  final Color color;
+  final Color? color;
 
   const PharmacySecondaryButton({
     super.key,
@@ -1334,21 +1458,20 @@ class PharmacySecondaryButton extends StatelessWidget {
     this.icon,
     required this.onPressed,
     this.fullWidth = true,
-    this.color = PharmacyColors.green,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    // No colour given: the icon takes the module accent, the label stays ink.
+    final color = this.color ?? ModuleAccent.of(context).color;
     final child = OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
-        side: BorderSide(
-          color: color == PharmacyColors.green
-              ? PharmacyColors.border
-              : color.withValues(alpha: 0.3),
-        ),
-        minimumSize: const Size(0, 48),
+        backgroundColor: PharmacyColors.panel,
+        side: BorderSide.none,
+        minimumSize: const Size(0, 46),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(PharmacyColors.radiusButton),
         ),
@@ -1358,9 +1481,17 @@ class PharmacySecondaryButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (icon != null) ...[Icon(icon, size: 18), const SizedBox(width: 8)],
-          Text(
-            label,
-            style: _inter(size: 14, weight: FontWeight.w600, color: color),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _inter(
+                size: 13,
+                weight: FontWeight.w600,
+                color: this.color == null ? PharmacyColors.textPrimary : color,
+              ),
+            ),
           ),
         ],
       ),
@@ -1385,17 +1516,24 @@ class PharmacyFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return PharmacyPressable(
+      scale: 0.94,
+      onTap: onPressed,
+      semanticLabel: label,
+      child: _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
         boxShadow: PharmacyColors.shadowElevated,
       ),
       child: Material(
-        color: PharmacyColors.green,
+        color: ModuleAccent.of(context).color,
         borderRadius: BorderRadius.circular(28),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(28),
-          onTap: onPressed,
+        child: SizedBox(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: Row(
@@ -1406,7 +1544,7 @@ class PharmacyFab extends StatelessWidget {
                 Text(
                   label,
                   style: _inter(
-                    size: 13.5,
+                    size: 13,
                     weight: FontWeight.w600,
                     color: Colors.white,
                   ),
@@ -1436,7 +1574,7 @@ Future<T?> showPharmacySheet<T>(
     backgroundColor: Colors.transparent,
     builder: (ctx) => Container(
       decoration: const BoxDecoration(
-        color: PharmacyColors.card,
+        color: PharmacyColors.bg,
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(PharmacyColors.radiusSheet),
         ),
@@ -1484,8 +1622,8 @@ class PharmacyDialog {
     BuildContext context, {
     required String title,
     String? subtitle,
-    IconData icon = CupertinoIcons.square_pencil,
-    Color accentColor = PharmacyColors.green,
+    IconData icon = LucideIcons.squarePen,
+    Color? accentColor,
     required Widget content,
     required List<Widget> actions,
   }) {
@@ -1499,7 +1637,7 @@ class PharmacyDialog {
           constraints: const BoxConstraints(maxWidth: 440),
           child: Container(
             decoration: BoxDecoration(
-              color: PharmacyColors.card,
+              color: PharmacyColors.bg,
               borderRadius: BorderRadius.circular(
                 PharmacyColors.radiusCardLarge,
               ),
@@ -1514,7 +1652,11 @@ class PharmacyDialog {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(icon, color: accentColor, size: 22),
+                      Icon(
+                        icon,
+                        color: accentColor ?? ModuleAccent.of(ctx).color,
+                        size: 22,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -1523,7 +1665,7 @@ class PharmacyDialog {
                             Text(
                               title,
                               style: _inter(
-                                size: 16,
+                                size: 15,
                                 weight: FontWeight.w600,
                                 color: PharmacyColors.textPrimary,
                               ),
@@ -1533,7 +1675,7 @@ class PharmacyDialog {
                               Text(
                                 subtitle,
                                 style: _inter(
-                                  size: 12,
+                                  size: 11.5,
                                   color: PharmacyColors.textSecondary,
                                 ),
                               ),
@@ -1585,21 +1727,23 @@ class PharmacyDialog {
   static Widget primaryButton(
     String label,
     VoidCallback? onPressed, {
-    Color color = PharmacyColors.green,
+    Color? color,
   }) {
-    return FilledButton(
-      onPressed: onPressed,
-      style: FilledButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(0, 48),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(PharmacyColors.radiusButton),
+    return Builder(
+      builder: (context) => FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: color ?? ModuleAccent.of(context).color,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(PharmacyColors.radiusButton),
+          ),
         ),
-      ),
-      child: Text(
-        label,
-        style: _inter(size: 14, weight: FontWeight.w600, color: Colors.white),
+        child: Text(
+          label,
+          style: _inter(size: 13, weight: FontWeight.w600, color: Colors.white),
+        ),
       ),
     );
   }
@@ -1611,12 +1755,14 @@ class PharmacyDialog {
     BuildContext context, {
     required String title,
     required String message,
-    IconData icon = CupertinoIcons.exclamationmark_triangle,
+    IconData icon = LucideIcons.triangleAlert,
     String confirmLabel = 'Confirm',
     String cancelLabel = 'Cancel',
     bool destructive = true,
   }) async {
-    final color = destructive ? PharmacyColors.error : PharmacyColors.green;
+    final color = destructive
+        ? PharmacyColors.error
+        : ModuleAccent.of(context).color;
     final result = await show<bool>(
       context,
       title: title,
@@ -1625,7 +1771,7 @@ class PharmacyDialog {
       content: Text(
         message,
         style: _inter(
-          size: 13.5,
+          size: 13,
           color: PharmacyColors.textSecondary,
           height: 1.5,
         ),
@@ -1644,5 +1790,163 @@ class PharmacyDialog {
       ],
     );
     return result == true;
+  }
+}
+
+/// Forces typed text to uppercase as it is entered — for GSTINs, drug licence
+/// numbers and other codes the server stores in capitals.
+class PharmacyUpperCaseFormatter extends TextInputFormatter {
+  const PharmacyUpperCaseFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) => newValue.copyWith(text: newValue.text.toUpperCase());
+}
+
+// ═══════════════════════ Minimal section primitives ═══════════════════════
+
+/// "DELIVERY ADDRESS" → "Delivery address". Screens still pass the old
+/// upper-case labels; the minimal style sets section titles in sentence case.
+String pharmacySentenceCase(String text) {
+  final t = text.trim();
+  if (t.isEmpty) return t;
+  if (t != t.toUpperCase()) return t;
+  final lower = t.toLowerCase();
+  return '${lower[0].toUpperCase()}${lower.substring(1)}'
+      .replaceAll('gstin', 'GSTIN')
+      .replaceAll('upi', 'UPI')
+      .replaceAll(' rx', ' Rx');
+}
+
+/// A section heading above a [PharmacyGroup]: 15pt bold ink, optional green
+/// text action on the right.
+class PharmacySectionTitle extends StatelessWidget {
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+
+  const PharmacySectionTitle(
+    this.text, {
+    super.key,
+    this.action,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    // Flush left, so titles line up with form-field labels below them.
+    padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            pharmacySentenceCase(text),
+            style: _inter(
+              size: 13,
+              weight: FontWeight.w700,
+              color: PharmacyColors.textStrong,
+            ),
+          ),
+        ),
+        if (action != null)
+          GestureDetector(
+            onTap: onAction,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Text(
+                action!,
+                style: _inter(
+                  size: 11.5,
+                  weight: FontWeight.w600,
+                  color: ModuleAccent.of(context).color,
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// The minimal style's grouped panel: grey fill, 14px corners, no border or
+/// shadow. Pass rows and hairlines as children.
+class PharmacyGroup extends StatelessWidget {
+  final List<Widget> children;
+  const PharmacyGroup({super.key, required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: PharmacyColors.panel,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Column(children: children),
+  );
+}
+
+/// Divider between rows inside a [PharmacyGroup] — white on the grey panel,
+/// inset from the left like an iOS grouped list.
+class PharmacyHairline extends StatelessWidget {
+  const PharmacyHairline({super.key});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 1,
+    margin: const EdgeInsets.only(left: 16),
+    color: PharmacyColors.bg,
+  );
+}
+
+/// "You're offline" strip, shown above the pharmacy nav bar while the server
+/// cannot be reached. The screens keep showing what they last loaded; the
+/// orders check retries every 20 seconds and clears this on its own.
+class PharmacyOfflineBanner extends StatelessWidget {
+  final VoidCallback onRetry;
+  const PharmacyOfflineBanner({super.key, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: PharmacyColors.textStrong,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.wifiOff, size: 16, color: Colors.white),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "You're offline · showing the last loaded data",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _inter(
+                size: 12.5,
+                weight: FontWeight.w500,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: Text(
+              'Retry',
+              style: _inter(
+                size: 12.5,
+                weight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

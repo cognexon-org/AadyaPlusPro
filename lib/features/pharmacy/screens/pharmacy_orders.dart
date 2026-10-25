@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -11,12 +10,15 @@ import '../theme/pharmacy_type.dart';
 import '../../../core/network/api_service.dart';
 import '../theme/pharmacy_colors.dart';
 import '../providers/pharmacy_store_provider.dart';
+import '../providers/pharmacy_orders_provider.dart';
+import '../widgets/delivery_sheets.dart';
 import '../widgets/order_action_sheets.dart';
 import '../widgets/pharmacy_ui.dart';
 import 'order_details_screen.dart';
 
 const kOrderStatuses = <String?>[
   null,
+  PharmacyOrdersNotifier.awaitingFilter,
   'prescription_review',
   'placed',
   'confirmed',
@@ -28,10 +30,20 @@ const kOrderStatuses = <String?>[
   'cancelled',
 ];
 
-String orderStatusLabel(String s) => s
-    .split('_')
-    .map((x) => x.isEmpty ? x : '${x[0].toUpperCase()}${x.substring(1)}')
-    .join(' ');
+/// Sentence case ("Ready to ship"), the module's label style.
+String orderStatusLabel(String s) {
+  if (s == PharmacyOrdersNotifier.awaitingFilter) return 'Needs action';
+  // Local delivery words, not courier ones.
+  const named = {
+    'ready_to_ship': 'Packed',
+    'shipped': 'With courier',
+    'out_for_delivery': 'Out for delivery',
+  };
+  if (named.containsKey(s)) return named[s]!;
+  final words = s.replaceAll('_', ' ').trim();
+  if (words.isEmpty) return words;
+  return '${words[0].toUpperCase()}${words.substring(1)}';
+}
 
 class PharmacyOrders extends ConsumerStatefulWidget {
   const PharmacyOrders({super.key});
@@ -43,23 +55,14 @@ class PharmacyOrders extends ConsumerStatefulWidget {
 class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
   final _api = ApiService();
   final _search = TextEditingController();
-  List<Map<String, dynamic>> _orders = const [];
-  bool _loading = true;
-  String? _filter;
-  String? _error;
-  String? _loadedStoreId;
 
   /// Ids currently being accepted or rejected, so a card can show its own
   /// spinner without freezing the whole list.
   final Set<String> _busy = {};
 
-  /// Drives the elapsed-time counters on new orders. Only runs while at least
-  /// one order is actually waiting — a list of delivered orders has nothing
-  /// to count, and a timer ticking behind it would just burn battery.
-  Timer? _ticker;
-
   static const _quickFilters = <String?>[
     null,
+    PharmacyOrdersNotifier.awaitingFilter,
     'prescription_review',
     'placed',
     'confirmed',
@@ -70,35 +73,26 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     super.initState();
     Future.microtask(() async {
       await ref.read(pharmacyStoreProvider.notifier).initialize();
-      if (mounted) await _load();
+      if (mounted) {
+        ref.read(pharmacyOrdersProvider.notifier).initialize();
+      }
     });
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
     _search.dispose();
     super.dispose();
   }
 
-  void _syncTicker() {
-    final waiting = _orders.any(_isAwaitingAction);
-    if (waiting && _ticker == null) {
-      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() {});
-      });
-    } else if (!waiting) {
-      _ticker?.cancel();
-      _ticker = null;
-    }
-  }
-
   /// An order the pharmacy has not yet accepted or turned down.
+  ///
+  /// `prescription_review` always carries a `pending_review` prescription —
+  /// the backend creates it that way and flips it to `placed` on approval —
+  /// so it counts as waiting too; the card offers the review instead of Accept.
   static bool _isAwaitingAction(Map<String, dynamic> order) {
     final status = '${order['orderStatus'] ?? ''}';
-    final rx = '${order['prescriptionStatus'] ?? ''}';
-    return status == 'placed' ||
-        (status == 'prescription_review' && rx != 'pending_review');
+    return status == 'placed' || status == 'prescription_review';
   }
 
   /// The one action that moves this order forward, or null when it is the
@@ -107,7 +101,7 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     const ladder = {
       'confirmed': ('packing', 'Start packing'),
       'packing': ('ready_to_ship', 'Mark packed'),
-      'ready_to_ship': ('shipped', 'Hand to courier'),
+      'ready_to_ship': ('out_for_delivery', 'Hand to driver'),
       'shipped': ('out_for_delivery', 'Out for delivery'),
       'out_for_delivery': ('delivered', 'Mark delivered'),
     };
@@ -115,39 +109,7 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     return step == null ? null : (status: step.$1, label: step.$2);
   }
 
-  Future<void> _load() async {
-    final storeId = ref.read(pharmacyStoreProvider).selectedStoreId;
-    if (storeId == null) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final response = await _api.getMerchantOrders(
-        queryParams: {
-          'limit': 100,
-          if (_filter != null) 'status': _filter,
-          if (_search.text.trim().isNotEmpty) 'q': _search.text.trim(),
-        },
-      );
-      final data = response.data;
-      if (!mounted) return;
-      setState(() {
-        _orders = _maps(data is Map ? data['orders'] : data);
-        _loadedStoreId = storeId;
-        _loading = false;
-      });
-      _syncTicker();
-    } on DioException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = _message(e);
-      });
-    }
-  }
-
-  /// Runs one card's action and refreshes, keeping the spinner on that card.
+  /// Runs one card's action and refreshes silently, keeping the spinner on that card.
   Future<void> _act(
     String id,
     Future<Response> Function() action,
@@ -159,7 +121,7 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
       await action();
       if (!mounted) return;
       _toast(success, PharmacyColors.success);
-      await _load();
+      ref.read(pharmacyOrdersProvider.notifier).loadOrders(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       _toast(_message(e), PharmacyColors.error);
@@ -176,7 +138,13 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     final items = _maps(order['items']);
     final availability = await showPharmacySheet<Map<String, int>>(
       context,
-      builder: (_) => OrderAvailabilitySheet(items: items),
+      builder: (_) => OrderAvailabilitySheet(
+        items: items,
+        orderId: id,
+        customerPhone: order['deliveryAddress'] is Map
+            ? '${(order['deliveryAddress'] as Map)['phone'] ?? ''}'
+            : null,
+      ),
     );
     if (availability == null || !mounted) return;
 
@@ -259,7 +227,7 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
@@ -267,25 +235,25 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     );
   }
 
-  Future<void> _openFilterSheet() async {
-    final selected = await showPharmacySheet<String?>(
+  Future<void> _openFilterSheet(String? currentFilter) async {
+    // The choice is wrapped in a record because a bare `null` means both
+    // "All orders" and "sheet dismissed" — swiping the sheet away used to
+    // clear the filter.
+    final result = await showPharmacySheet<({String? status})>(
       context,
-      builder: (ctx) => _OrderFilterSheet(initial: _filter),
+      builder: (ctx) => _OrderFilterSheet(initial: currentFilter),
     );
-    if (selected != _filter) {
-      setState(() => _filter = selected);
-      _load();
+    if (result == null || !mounted) return;
+    if (result.status != currentFilter) {
+      ref.read(pharmacyOrdersProvider.notifier).setFilter(result.status);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final store = ref.watch(pharmacyStoreProvider);
-    if (store.selectedStoreId != null &&
-        store.selectedStoreId != _loadedStoreId &&
-        !_loading) {
-      Future.microtask(_load);
-    }
+    final ordersState = ref.watch(pharmacyOrdersProvider);
+    final currentFilter = ordersState.filter;
+
     return Scaffold(
       backgroundColor: PharmacyColors.bg,
       body: SafeArea(
@@ -300,45 +268,52 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
                     title: 'Orders',
                     subtitle: 'Online orders for this branch',
                     trailing: IconButton(
-                      onPressed: _openFilterSheet,
+                      onPressed: () => _openFilterSheet(currentFilter),
                       icon: Icon(
-                        CupertinoIcons.slider_horizontal_3,
-                        color: _filter != null
+                        LucideIcons.slidersHorizontal,
+                        color: currentFilter != null
                             ? PharmacyColors.green
                             : PharmacyColors.textSecondary,
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
+                  _summaryStrip(ordersState),
+                  const SizedBox(height: 12),
                   PharmacySearchField(
                     controller: _search,
                     hint: 'Search by order number...',
-                    onSubmitted: _load,
-                    onRefresh: _load,
+                    onSubmitted: () {
+                      ref
+                          .read(pharmacyOrdersProvider.notifier)
+                          .setSearch(_search.text.trim());
+                    },
+                    onRefresh: () {
+                      ref
+                          .read(pharmacyOrdersProvider.notifier)
+                          .loadOrders(silent: true);
+                    },
                   ),
                   const SizedBox(height: 10),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        // A status picked from the sheet that is not one of
-                        // the four quick chips used to leave every chip
-                        // unselected, so the list looked filtered by nothing.
-                        // Show it as its own selected chip instead.
                         for (final s in [
                           ..._quickFilters,
-                          if (_filter != null &&
-                              !_quickFilters.contains(_filter))
-                            _filter,
+                          if (currentFilter != null &&
+                              !_quickFilters.contains(currentFilter))
+                            currentFilter,
                         ])
                           Padding(
                             padding: const EdgeInsets.only(right: 7),
                             child: PharmacyFilterChip(
                               label: s == null ? 'All' : orderStatusLabel(s),
-                              selected: _filter == s,
+                              selected: currentFilter == s,
                               onTap: () {
-                                setState(() => _filter = s);
-                                _load();
+                                ref
+                                    .read(pharmacyOrdersProvider.notifier)
+                                    .setFilter(s);
                               },
                             ),
                           ),
@@ -348,37 +323,71 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
                 ],
               ),
             ),
+            // Two pixels, only while a chip or search is being confirmed by
+            // the server — so a list that may still change never reads as
+            // the final answer.
+            SizedBox(
+              height: 2,
+              child: AnimatedOpacity(
+                opacity: ordersState.isSwitching ? 1 : 0,
+                duration: PharmacyMotion.fast,
+                child: const LinearProgressIndicator(
+                  minHeight: 2,
+                  color: PharmacyColors.green,
+                  backgroundColor: Colors.transparent,
+                ),
+              ),
+            ),
             Expanded(
-              child: _loading
+              child: ordersState.isLoading && ordersState.orders.isEmpty
                   ? ListView(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                       children: const [PharmacyListSkeleton(count: 5)],
                     )
-                  : _error != null
+                  : ordersState.error != null && ordersState.orders.isEmpty
                   ? Padding(
                       padding: const EdgeInsets.all(16),
                       child: PharmacyErrorBanner(
-                        message: _error!,
-                        onRetry: _load,
+                        message: ordersState.error!,
+                        onRetry: () {
+                          ref
+                              .read(pharmacyOrdersProvider.notifier)
+                              .loadOrders();
+                        },
                       ),
                     )
                   : RefreshIndicator(
                       color: PharmacyColors.green,
-                      onRefresh: _load,
-                      child: _orders.isEmpty
+                      onRefresh: () => ref
+                          .read(pharmacyOrdersProvider.notifier)
+                          .loadOrders(silent: true),
+                      child: ordersState.orders.isEmpty
                           ? ListView(
                               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                              children: const [
-                                SizedBox(height: 40),
+                              children: [
+                                const SizedBox(height: 40),
                                 PharmacyEmptyStateInline(
-                                  icon: CupertinoIcons.bag,
-                                  text: 'No online orders for this branch',
+                                  icon: LucideIcons.shoppingBag,
+                                  text: _emptyText(ordersState),
                                 ),
                               ],
                             )
-                          : ListView(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                              children: _groupedByDay(),
+                          : Builder(
+                              builder: (_) {
+                                final rows = _groupedByDay(ordersState.orders);
+                                return ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    4,
+                                    16,
+                                    24,
+                                  ),
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  itemCount: rows.length,
+                                  itemBuilder: (_, i) => rows[i],
+                                );
+                              },
                             ),
                     ),
             ),
@@ -388,32 +397,172 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     );
   }
 
+  String _emptyText(PharmacyOrdersState s) {
+    if (s.searchQuery.trim().isNotEmpty) {
+      return 'No orders match "${s.searchQuery.trim()}"';
+    }
+    if (s.filter == null) return 'No online orders for this branch yet';
+    if (s.filter == PharmacyOrdersNotifier.awaitingFilter) {
+      return 'Nothing needs action right now';
+    }
+    return 'No ${orderStatusLabel(s.filter!).toLowerCase()} orders';
+  }
+
+  /// Three live counts across the top: what is waiting on the store, what is
+  /// being worked on, and what was delivered today. Tapping one filters.
+  Widget _summaryStrip(PharmacyOrdersState state) {
+    final waiting = state.awaitingOrders.length;
+    const active = {
+      'confirmed',
+      'packing',
+      'ready_to_ship',
+      'shipped',
+      'out_for_delivery',
+    };
+    final inProgress = state.orders
+        .where((o) => active.contains('${o['orderStatus']}'))
+        .length;
+    final today = DateTime.now();
+    final deliveredToday = state.orders.where((o) {
+      if ('${o['orderStatus']}' != 'delivered') return false;
+      final d = DateTime.tryParse('${o['updatedAt'] ?? ''}')?.toLocal();
+      return d != null &&
+          d.year == today.year &&
+          d.month == today.month &&
+          d.day == today.day;
+    }).length;
+
+    Widget tile(
+      String label,
+      int value,
+      Color tone,
+      Color surface,
+      String? filter, {
+      bool live = false,
+    }) => Expanded(
+      child: PharmacyPressable(
+        scale: 0.96,
+        onTap: () =>
+            ref.read(pharmacyOrdersProvider.notifier).setFilter(filter),
+        child: AnimatedContainer(
+          duration: PharmacyMotion.medium,
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          decoration: BoxDecoration(
+            // Neutral panels; the selected one gains an ink outline. Colour
+            // is left to the live dot alone.
+            color: PharmacyColors.panel,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              width: 1.5,
+              color: state.filter == filter && filter != null
+                  ? PharmacyColors.textStrong
+                  : PharmacyColors.panel,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  PharmacyCountUp(
+                    value: value,
+                    format: (v) => '${v.round()}',
+                    duration: const Duration(milliseconds: 500),
+                    style: PharmacyType.number(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      height: 1.1,
+                      color: PharmacyColors.textStrong,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (live && value > 0) PharmacyPulse(color: tone, size: 6),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: PharmacyType.sans(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  color: PharmacyColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Row(
+      children: [
+        tile(
+          'Waiting',
+          waiting,
+          PharmacyColors.greenDark,
+          PharmacyColors.greenVeryLight,
+          // Both kinds of waiting order — new ones and ones whose
+          // prescription still needs checking — so the list matches the
+          // number on the tile.
+          PharmacyOrdersNotifier.awaitingFilter,
+          live: true,
+        ),
+        const SizedBox(width: 8),
+        tile(
+          'In progress',
+          inProgress,
+          PharmacyColors.info,
+          PharmacyTileStyle.blue.surface,
+          'confirmed',
+        ),
+        const SizedBox(width: 8),
+        tile(
+          'Delivered',
+          deliveredToday,
+          PharmacyColors.textSecondary,
+          PharmacyColors.bgSecondary,
+          'delivered',
+        ),
+      ],
+    );
+  }
+
   /// Orders arrive across days, and a flat run of cards gives no sense of
   /// when. A day heading every time the date changes costs one text row and
   /// makes the list scannable.
-  List<Widget> _groupedByDay() {
+  List<Widget> _groupedByDay(List<Map<String, dynamic>> orders) {
     final widgets = <Widget>[];
     String? lastBucket;
-    for (final order in _orders) {
+    var n = 0;
+    for (final order in orders) {
       final bucket = _dayBucket(order['createdAt']?.toString());
       if (bucket != lastBucket) {
         widgets.add(
           Padding(
+            key: ValueKey('day-$bucket'),
             padding: EdgeInsets.fromLTRB(2, widgets.isEmpty ? 2 : 14, 2, 8),
             child: Text(
-              bucket.toUpperCase(),
+              bucket,
               style: PharmacyType.sans(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.4,
-                color: PharmacyColors.textTertiary,
+                fontSize: PharmacyType.small,
+                fontWeight: FontWeight.w600,
+                color: PharmacyColors.textSecondary,
               ),
             ),
           ),
         );
         lastBucket = bucket;
       }
-      widgets.add(_orderCard(order));
+      // Keyed by id so a newly arrived order slides in at the top instead of
+      // every card below it re-rendering in a shifted slot.
+      widgets.add(
+        KeyedSubtree(
+          key: ValueKey('order-${order['_id']}'),
+          child: PharmacyEntrance(index: n++, child: _orderCard(order)),
+        ),
+      );
     }
     return widgets;
   }
@@ -440,304 +589,232 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     final items = _maps(order['items']);
     final cod = '${order['paymentMethod']}' == 'cod';
     final paid = '${order['paymentStatus']}' == 'paid';
-    final rxPending = '${order['prescriptionStatus']}' == 'pending_review';
-    final waited = _waitedFor(order['createdAt']?.toString());
-    // Waiting longer no longer turns the card red. The clock is the urgency
-    // cue on its own; a red card in a list of green ones reads as an error,
-    // not as "hurry up".
-    final urgent = waited != null && waited.inMinutes >= 5;
+    final rxPending =
+        '${order['orderStatus']}' == 'prescription_review' ||
+        '${order['prescriptionStatus']}' == 'pending_review';
 
+    // Minimal style: the same grey panel as every other card. What marks a
+    // waiting order is the live dot and clock on its first line and the
+    // green primary button — not a banner, glow or coloured border.
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         decoration: BoxDecoration(
-          color: PharmacyColors.bg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: PharmacyColors.green, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: PharmacyColors.green.withValues(alpha: 0.16),
-              blurRadius: 16,
-              offset: const Offset(0, 5),
+          color: PharmacyColors.panel,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const PharmacyPulse(size: 7),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    rxPending ? 'New · Rx to check' : 'New order',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: PharmacyType.sans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: PharmacyColors.greenDark,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _WaitClock(
+                  createdAt: order['createdAt']?.toString(),
+                  acceptBy: order['acceptBy']?.toString(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        display,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: PharmacyType.sans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: PharmacyColors.textStrong,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${order['orderNumber'] ?? 'Order'}  ·  ${items.length} ${items.length == 1 ? 'item' : 'items'}',
+                        style: PharmacyType.sans(
+                          fontSize: 11.5,
+                          color: PharmacyColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _rupees(order['totalAmount']),
+                      style: PharmacyType.number(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: PharmacyColors.textStrong,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      cod && !paid
+                          ? 'Cash on delivery'
+                          : paid
+                          ? 'Paid online'
+                          : 'Payment pending',
+                      style: PharmacyType.sans(
+                        fontSize: 11.5,
+                        color: PharmacyColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (items.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _itemPreview(items),
+            ],
+            if (rxPending) ...[const SizedBox(height: 10), _rxBanner()],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _quietButton(
+                    'Reject',
+                    busy ? null : () => _reject(order),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: PharmacyButton(
+                    compact: true,
+                    // A prescription still under review blocks acceptance
+                    // server-side, so the card offers the review instead.
+                    label: rxPending ? 'Review prescription' : 'Accept order',
+                    loading: busy,
+                    onPressed: busy
+                        ? null
+                        : () =>
+                              rxPending ? _openDetails(order) : _accept(order),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(15),
-          child: Column(
-            children: [
-              // The banner does the shouting: a waiting order should be
-              // visible from across a counter.
-              Container(
-                width: double.infinity,
-                color: PharmacyColors.green,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      LucideIcons.bellRing,
-                      size: 14,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      'NEW ORDER',
-                      style: PharmacyType.sans(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.1,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (waited != null)
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: urgent ? 8 : 0,
-                          vertical: urgent ? 3 : 0,
-                        ),
-                        decoration: urgent
-                            ? BoxDecoration(
-                                // Still green — just brighter and boxed, so a
-                                // long wait reads as emphasis rather than
-                                // alarm.
-                                color: Colors.white.withValues(alpha: 0.22),
-                                borderRadius: BorderRadius.circular(20),
-                              )
-                            : null,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              LucideIcons.clock,
-                              size: 13,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              _clock(waited),
-                              style: PharmacyType.number(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                display,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: PharmacyType.sans(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                  color: PharmacyColors.textStrong,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${order['orderNumber'] ?? 'Order'}  ·  ${items.length} ${items.length == 1 ? 'item' : 'items'}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: PharmacyType.sans(
-                                  fontSize: 11.5,
-                                  color: PharmacyColors.textTertiary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              _rupees(order['totalAmount']),
-                              style: PharmacyType.number(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
-                                color: PharmacyColors.textStrong,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              cod
-                                  ? 'Collect on delivery'
-                                  : paid
-                                  ? 'Paid online'
-                                  : 'Payment pending',
-                              style: PharmacyType.sans(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w700,
-                                color: cod && !paid
-                                    ? PharmacyColors.warning
-                                    : PharmacyColors.greenDark,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    if (items.isNotEmpty) ...[
-                      const SizedBox(height: 11),
-                      _itemPreview(items),
-                    ],
-                    if (rxPending) ...[const SizedBox(height: 10), _rxBanner()],
-                  ],
-                ),
-              ),
-              Container(height: 1, color: PharmacyColors.border),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(11, 10, 11, 11),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: PharmacySecondaryButton(
-                        label: 'Reject',
-                        color: PharmacyColors.error,
-                        onPressed: busy ? null : () => _reject(order),
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      flex: 2,
-                      child: PharmacyButton(
-                        // A prescription still under review blocks acceptance
-                        // server-side, so the card sends them to review it
-                        // rather than offering a button that will fail.
-                        label: rxPending ? 'Review prescription' : 'Accept',
-                        icon: rxPending
-                            ? LucideIcons.fileText
-                            : LucideIcons.check,
-                        loading: busy,
-                        onPressed: busy
-                            ? null
-                            : () => rxPending
-                                  ? _openDetails(order)
-                                  : _accept(order),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
 
-  /// First two lines of the basket. Enough to judge whether the order can be
-  /// filled without opening it, which is the point.
-  Widget _itemPreview(List<Map<String, dynamic>> items) {
-    final shown = items.take(2).toList();
-    final rest = items.length - shown.length;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+  /// White text-button on the grey panel — the secondary action, with no
+  /// outline or tint competing with the primary one.
+  Widget _quietButton(String label, VoidCallback? onTap) => PharmacyPressable(
+    onTap: onTap,
+    scale: 0.96,
+    child: Container(
+      height: 40,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: PharmacyColors.bgSecondary,
-        borderRadius: BorderRadius.circular(10),
+        color: PharmacyColors.bg,
+        borderRadius: BorderRadius.circular(PharmacyColors.radiusButton),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final item in shown)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${item['medicineName'] ?? 'Medicine'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: PharmacyType.sans(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: PharmacyColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '×${(num.tryParse('${item['quantity'] ?? 0}') ?? 0).toInt()}',
-                    style: PharmacyType.number(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: PharmacyColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (rest > 0)
-            Text(
-              '+$rest more',
-              style: PharmacyType.sans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: PharmacyColors.greenDark,
-              ),
-            ),
-        ],
+      child: Text(
+        label,
+        style: PharmacyType.sans(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: onTap == null
+              ? PharmacyColors.textDisabled
+              : PharmacyColors.textPrimary,
+        ),
       ),
-    );
-  }
-
-  Widget _rxBanner() => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    decoration: BoxDecoration(
-      color: PharmacyColors.warningBg,
-      borderRadius: BorderRadius.circular(9),
-    ),
-    child: Row(
-      children: [
-        const Icon(
-          LucideIcons.fileText,
-          size: 13,
-          color: PharmacyColors.warning,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Prescription needs review before this can be accepted',
-            style: PharmacyType.sans(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: PharmacyColors.warning,
-            ),
-          ),
-        ),
-      ],
     ),
   );
 
-  /// Where an order sits on the fulfilment ladder, and what it looks like.
-  ///
-  /// `stage` is its position out of five; -1 marks a terminal state, which
-  /// gets a flat treatment because there is no progress left to show.
+  /// First two lines of the basket — enough to judge whether the order can
+  /// be filled without opening it.
+  Widget _itemPreview(List<Map<String, dynamic>> items) {
+    final shown = items.take(2).toList();
+    final rest = items.length - shown.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final item in shown)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${item['medicineName'] ?? 'Medicine'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: PharmacyType.sans(
+                      fontSize: PharmacyType.small,
+                      color: PharmacyColors.textPrimary,
+                    ),
+                  ),
+                ),
+                Text(
+                  '×${(num.tryParse('${item['quantity'] ?? 0}') ?? 0).toInt()}',
+                  style: PharmacyType.number(
+                    fontSize: PharmacyType.small,
+                    fontWeight: FontWeight.w600,
+                    color: PharmacyColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (rest > 0)
+          Text(
+            '+$rest more',
+            style: PharmacyType.sans(
+              fontSize: 11.5,
+              color: PharmacyColors.textSecondary,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _rxBanner() => Row(
+    children: [
+      const Icon(LucideIcons.fileText, size: 15, color: PharmacyColors.warning),
+      const SizedBox(width: 7),
+      Expanded(
+        child: Text(
+          'Check the prescription before accepting',
+          style: PharmacyType.sans(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w500,
+            color: PharmacyColors.warning,
+          ),
+        ),
+      ),
+    ],
+  );
+
+  /// Where an order sits on the fulfilment ladder, and its tone. `stage` is
+  /// its position out of five; -1 marks a terminal state.
   static ({int stage, IconData icon, Color tone}) _stageOf(String status) {
     switch (status) {
       case 'confirmed':
@@ -750,23 +827,31 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
         return (
           stage: 2,
           icon: LucideIcons.package,
-          tone: PharmacyColors.warning,
+          tone: PharmacyColors.greenDark,
         );
       case 'ready_to_ship':
         return (
           stage: 3,
           icon: LucideIcons.packageCheck,
-          tone: PharmacyColors.info,
+          tone: PharmacyColors.greenDark,
         );
       case 'shipped':
-        return (stage: 4, icon: LucideIcons.truck, tone: PharmacyColors.info);
+        return (
+          stage: 4,
+          icon: LucideIcons.truck,
+          tone: PharmacyColors.greenDark,
+        );
       case 'out_for_delivery':
-        return (stage: 4, icon: LucideIcons.bike, tone: PharmacyColors.warning);
+        return (
+          stage: 4,
+          icon: LucideIcons.bike,
+          tone: PharmacyColors.greenDark,
+        );
       case 'delivered':
         return (
           stage: 5,
           icon: LucideIcons.circleCheckBig,
-          tone: PharmacyColors.greenDark,
+          tone: PharmacyColors.textSecondary,
         );
       case 'cancelled':
         return (stage: -1, icon: LucideIcons.ban, tone: PharmacyColors.error);
@@ -781,11 +866,8 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     }
   }
 
-  /// An order already accepted.
-  ///
-  /// Built to be actioned without opening: a stage header that says how long
-  /// it has been sitting there, where it is going, what is in it, and the one
-  /// button that moves it on.
+  /// An order already accepted: stage as small coloured text, a thin rail
+  /// for progress, and the one button that moves it on.
   Widget _activeOrderCard(Map<String, dynamic> order) {
     final id = '${order['_id'] ?? ''}';
     final busy = _busy.contains(id);
@@ -797,261 +879,150 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     final step = _nextStep(status);
     final stage = _stageOf(status);
     final terminal = stage.stage < 0;
-    final done = status == 'delivered';
     final cod = '${order['paymentMethod']}' == 'cod';
     final paid = '${order['paymentStatus']}' == 'paid';
-
-    final address = _map(order['deliveryAddress']);
-    final area = [
-      address['city'],
-      address['pincode'],
-    ].map((v) => '${v ?? ''}'.trim()).where((v) => v.isNotEmpty).join(' ');
+    final inStage = _inStageFor(order);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: PharmacyColors.bg,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _openDetails(order),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: terminal
-                    ? PharmacyColors.border
-                    : stage.tone.withValues(alpha: 0.3),
-              ),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(15),
-              child: Column(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: PharmacyPressable(
+        scale: 0.985,
+        onTap: () => _openDetails(order),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: PharmacyColors.panel,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  // Stage header. Tinted rather than solid so the card still
-                  // reads as calm next to the green NEW ORDER banner — an
-                  // accepted order is work in hand, not an alarm.
-                  Container(
-                    width: double.infinity,
-                    color: stage.tone.withValues(alpha: 0.1),
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    child: Row(
-                      children: [
-                        Icon(stage.icon, size: 14, color: stage.tone),
-                        const SizedBox(width: 7),
-                        Text(
-                          orderStatusLabel(status).toUpperCase(),
-                          style: PharmacyType.sans(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.9,
-                            color: stage.tone,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (!terminal && _inStageFor(order) != null)
-                          Text(
-                            '${_inStageFor(order)} in this stage',
-                            style: PharmacyType.sans(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                              color: stage.tone.withValues(alpha: 0.85),
-                            ),
-                          ),
-                      ],
+                  Icon(stage.icon, size: 14, color: stage.tone),
+                  const SizedBox(width: 6),
+                  Text(
+                    orderStatusLabel(status),
+                    style: PharmacyType.sans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: stage.tone,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    display,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: PharmacyType.sans(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: PharmacyColors.textStrong,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${order['orderNumber'] ?? 'Order'}  ·  ${items.length} ${items.length == 1 ? 'item' : 'items'}  ·  ${_timeAgo(order['createdAt']?.toString())}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: PharmacyType.sans(
-                                      fontSize: 10.5,
-                                      color: PharmacyColors.textTertiary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  _rupees(order['totalAmount']),
-                                  style: PharmacyType.number(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.4,
-                                    color: PharmacyColors.textStrong,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  cod && !paid ? 'COD' : 'Paid',
-                                  style: PharmacyType.sans(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: cod && !paid
-                                        ? PharmacyColors.warning
-                                        : PharmacyColors.greenDark,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        if (area.isNotEmpty) ...[
-                          const SizedBox(height: 9),
-                          Row(
-                            children: [
-                              const Icon(
-                                LucideIcons.mapPin,
-                                size: 12,
-                                color: PharmacyColors.textTertiary,
-                              ),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  area,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: PharmacyType.sans(
-                                    fontSize: 11.5,
-                                    color: PharmacyColors.textSecondary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (items.isNotEmpty) ...[
-                          const SizedBox(height: 9),
-                          // One line, not a list: on an accepted order the
-                          // contents are a reminder, not a decision.
-                          Text(
-                            _itemSummary(items),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: PharmacyType.sans(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: PharmacyColors.textPrimary,
-                            ),
-                          ),
-                        ],
-                        if (!terminal) ...[
-                          const SizedBox(height: 11),
-                          _progressRail(stage.stage, stage.tone),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (step != null)
-                    Container(
-                      color: stage.tone.withValues(alpha: 0.07),
-                      padding: const EdgeInsets.fromLTRB(8, 8, 11, 9),
-                      child: Row(
-                        children: [
-                          // The customer is one tap away at every stage —
-                          // "where is my order" is the call a pharmacy gets.
-                          _callButton(order),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _stepPrompt(status),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: PharmacyType.sans(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: PharmacyColors.textSecondary,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            height: 36,
-                            child: PharmacyButton(
-                              label: step.label,
-                              icon: LucideIcons.arrowRight,
-                              loading: busy,
-                              fullWidth: false,
-                              onPressed: busy
-                                  ? null
-                                  : () => _act(
-                                      id,
-                                      () => _api.updateMerchantOrderStatus(
-                                        id,
-                                        step.status,
-                                      ),
-                                      'Moved to ${orderStatusLabel(step.status)}',
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else if (done)
-                    Container(
-                      width: double.infinity,
-                      color: PharmacyColors.greenVeryLight,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            LucideIcons.circleCheckBig,
-                            size: 13,
-                            color: PharmacyColors.greenDark,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Delivered — settlement recorded',
-                              style: PharmacyType.sans(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: PharmacyColors.greenDark,
-                              ),
-                            ),
-                          ),
-                          const Icon(
-                            LucideIcons.chevronRight,
-                            size: 14,
-                            color: PharmacyColors.greenDark,
-                          ),
-                        ],
+                  const Spacer(),
+                  if (!terminal && inStage != null)
+                    Text(
+                      '$inStage in stage',
+                      style: PharmacyType.sans(
+                        fontSize: 11.5,
+                        color: PharmacyColors.textTertiary,
                       ),
                     ),
                 ],
               ),
-            ),
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          display,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: PharmacyType.sans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: PharmacyColors.textStrong,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          items.isEmpty
+                              ? '${order['orderNumber'] ?? 'Order'}'
+                              : _itemSummary(items),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: PharmacyType.sans(
+                            fontSize: 11.5,
+                            color: PharmacyColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _rupees(order['totalAmount']),
+                        style: PharmacyType.number(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: PharmacyColors.textStrong,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        cod && !paid ? 'Collect cash' : 'Paid',
+                        style: PharmacyType.sans(
+                          fontSize: 11.5,
+                          color: cod && !paid
+                              ? PharmacyColors.warning
+                              : PharmacyColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              if (!terminal) ...[
+                const SizedBox(height: 12),
+                _progressRail(stage.stage, PharmacyColors.green),
+              ],
+              if (step != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _callButton(order),
+                    const Spacer(),
+                    SizedBox(
+                      height: 40,
+                      child: PharmacyButton(
+                        compact: true,
+                        label: step.label,
+                        loading: busy,
+                        fullWidth: false,
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                final extra = await prepareDeliveryStep(
+                                  context,
+                                  order,
+                                  step.status,
+                                );
+                                if (extra == null || !mounted) return;
+                                await _act(
+                                  id,
+                                  () => _api.updateMerchantOrderStatus(
+                                    id,
+                                    step.status,
+                                    extra: extra,
+                                  ),
+                                  step.status == 'out_for_delivery'
+                                      ? 'Handed to driver — customer notified'
+                                      : 'Moved to ${orderStatusLabel(step.status)}',
+                                );
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -1137,7 +1108,7 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
           child: Container(
             height: 4,
             decoration: BoxDecoration(
-              color: i <= stage ? tone : PharmacyColors.border,
+              color: i <= stage ? tone : PharmacyColors.bg,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -1146,25 +1117,6 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
       ],
     ],
   );
-
-  /// What the pharmacy is being asked to do, phrased as the state it is in
-  /// rather than repeating the button label back.
-  static String _stepPrompt(String status) {
-    switch (status) {
-      case 'confirmed':
-        return 'Accepted — ready to pick and pack';
-      case 'packing':
-        return 'Being packed';
-      case 'ready_to_ship':
-        return 'Packed and waiting for pickup';
-      case 'shipped':
-        return 'With the courier';
-      case 'out_for_delivery':
-        return 'On its way to the customer';
-      default:
-        return '';
-    }
-  }
 
   /// How long an order has been waiting, or null if it has no timestamp.
   static Duration? _waitedFor(String? iso) {
@@ -1186,8 +1138,10 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
   Future<void> _openDetails(Map<String, dynamic> order) async {
     await Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => OrderDetailsScreen(order: order)));
-    if (mounted) await _load();
+    ).push(PharmacyPageRoute(builder: (_) => OrderDetailsScreen(order: order)));
+    if (mounted) {
+      ref.read(pharmacyOrdersProvider.notifier).loadOrders(silent: true);
+    }
   }
 
   static Map<String, dynamic> _map(dynamic value) =>
@@ -1216,16 +1170,6 @@ class _PharmacyOrdersState extends ConsumerState<PharmacyOrders> {
     if (days == 1) return 'Yesterday';
     if (days < 7) return DateFormat('EEEE').format(d);
     return DateFormat('d MMMM').format(d);
-  }
-
-  static String _timeAgo(String? iso) {
-    if (iso == null) return '';
-    final d = DateTime.tryParse(iso);
-    if (d == null) return '';
-    final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
   }
 
   static String _message(DioException e) {
@@ -1288,7 +1232,7 @@ class _OrderFilterSheetState extends State<_OrderFilterSheet> {
                 child: Text(
                   label,
                   style: PharmacyType.sans(
-                    fontSize: 13.5,
+                    fontSize: 13,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     color: selected
                         ? PharmacyColors.greenDark
@@ -1318,7 +1262,7 @@ class _OrderFilterSheetState extends State<_OrderFilterSheet> {
         Text(
           'Filter Orders',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
@@ -1327,7 +1271,7 @@ class _OrderFilterSheetState extends State<_OrderFilterSheet> {
         Text(
           'Status',
           style: PharmacyType.sans(
-            fontSize: 12,
+            fontSize: 11.5,
             fontWeight: FontWeight.w500,
             color: PharmacyColors.textSecondary,
           ),
@@ -1356,17 +1300,108 @@ class _OrderFilterSheetState extends State<_OrderFilterSheet> {
             Expanded(
               child: PharmacySecondaryButton(
                 label: 'Clear All',
-                onPressed: () => Navigator.of(context).pop(null),
+                onPressed: () => Navigator.of(context).pop((status: null)),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: PharmacyButton(
                 label: 'Apply',
-                onPressed: () => Navigator.of(context).pop(_selected),
+                onPressed: () => Navigator.of(context).pop((status: _selected)),
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The live "waiting for" clock on a new-order card. Its own widget so it
+/// is the only thing that rebuilds each second — the screen used to rebuild
+/// every card once a second while any order was waiting.
+class _WaitClock extends StatefulWidget {
+  final String? createdAt;
+
+  /// The server's auto-reject deadline. When present the clock counts down
+  /// to it; older servers that do not send it get the elapsed-time clock.
+  final String? acceptBy;
+  const _WaitClock({required this.createdAt, this.acceptBy});
+
+  @override
+  State<_WaitClock> createState() => _WaitClockState();
+}
+
+class _WaitClockState extends State<_WaitClock> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final deadline = DateTime.tryParse(widget.acceptBy ?? '')?.toLocal();
+    if (deadline != null) return _countdown(deadline);
+
+    final waited = _PharmacyOrdersState._waitedFor(widget.createdAt);
+    if (waited == null) return const SizedBox.shrink();
+    // After five minutes the clock turns amber — urgency as text colour,
+    // not as a red card.
+    final tone = waited.inMinutes >= 5
+        ? PharmacyColors.warning
+        : PharmacyColors.textSecondary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.clock, size: 13, color: tone),
+        const SizedBox(width: 4),
+        Text(
+          _PharmacyOrdersState._clock(waited),
+          style: PharmacyType.number(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: tone,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// "Auto-cancels in 7:42" — the time left before the server rejects the
+  /// order for not being answered. Amber under five minutes, red under two.
+  Widget _countdown(DateTime deadline) {
+    final left = deadline.difference(DateTime.now());
+    final over = left.isNegative;
+    final tone = over || left.inMinutes < 2
+        ? PharmacyColors.error
+        : left.inMinutes < 5
+        ? PharmacyColors.warning
+        : PharmacyColors.textSecondary;
+    final mm = left.inMinutes.toString();
+    final ss = (left.inSeconds % 60).toString().padLeft(2, '0');
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.timer, size: 13, color: tone),
+        const SizedBox(width: 4),
+        Text(
+          over ? 'Cancelling…' : 'Cancels in $mm:$ss',
+          style: PharmacyType.number(
+            fontSize: PharmacyType.caption,
+            fontWeight: FontWeight.w600,
+            color: tone,
+          ),
         ),
       ],
     );

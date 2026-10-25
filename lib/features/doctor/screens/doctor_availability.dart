@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/network/api_service.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../shared/ui/app_ui.dart';
+import '../providers/doctor_profile_provider.dart';
+import '../widgets/availability_day_sheet.dart';
+import '../widgets/availability_model.dart';
+import '../widgets/availability_save_bar.dart';
+import '../widgets/doctor_ui.dart';
+
+/// The doctor's weekly hours — the one place to set when patients can book.
+/// Replaces the old calendar, schedule and availability screens.
+///
+/// Reads GET /doctor/me/availability (works before verification) and saves
+/// the whole week with PUT /doctor/me/availability.
 class DoctorAvailability extends ConsumerStatefulWidget {
   const DoctorAvailability({super.key});
 
@@ -13,220 +22,353 @@ class DoctorAvailability extends ConsumerStatefulWidget {
 }
 
 class _DoctorAvailabilityState extends ConsumerState<DoctorAvailability> {
-  final ApiService _api = ApiService();
   bool _loading = true;
   bool _saving = false;
-  
-  final List<String> _days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-  Map<String, Map<String, dynamic>> _availability = {};
+  String? _error;
+
+  Map<String, AvailabilityDay> _initial = parseWeek(null);
+  Map<String, AvailabilityDay> _week = parseWeek(null);
+
+  /// Types the doctor has switched on in practice settings; null if unknown.
+  Set<String>? _enabledTypes;
+  int? _slotMinutes;
+
+  bool get _dirty => !_loading && _error == null && !sameWeek(_initial, _week);
 
   @override
   void initState() {
     super.initState();
-    _loadAvailability();
+    // After the first frame's build: loading updates the provider.
+    Future.microtask(_load);
   }
 
-  Future<void> _loadAvailability() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool force = false}) async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final res = await _api.getDoctorProfile();
-      final data = res.data;
-      final profile = data['doctor'] ?? data['profile'] ?? {};
-      final List existing = profile['availability'] ?? [];
-      
-      final Map<String, Map<String, dynamic>> map = {};
-      for (var day in _days) {
-        final found = existing.firstWhere((e) => e['day'] == day, orElse: () => null);
-        map[day] = {
-          'enabled': found != null,
-          'slots': found != null ? (found['slots'] as List).toList() : [],
-        };
-      }
-      _availability = map;
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
-  }
-
-  void _addSlot(String day) {
-    setState(() {
-      _availability[day]!['enabled'] = true;
-      _availability[day]!['slots'].add({
-        'startTime': '09:00',
-        'endTime': '17:00',
-        'type': 'clinic',
-        'maxPatients': 1,
+      final map = await ref
+          .read(doctorProfileProvider.notifier)
+          .loadAvailability(force: force);
+      final week = parseWeek(map['availability']);
+      final types = map['consultationTypes'];
+      if (!mounted) return;
+      setState(() {
+        _initial = week;
+        _week = week;
+        _enabledTypes = types is List
+            ? {
+                for (final t in types)
+                  if (t is Map && t['type'] != null) '${t['type']}',
+              }
+            : null;
+        _slotMinutes = int.tryParse('${map['slotDurationMinutes'] ?? ''}');
+        _loading = false;
       });
-    });
-  }
-
-  void _removeSlot(String day, int index) {
-    setState(() {
-      _availability[day]!['slots'].removeAt(index);
-      if (_availability[day]!['slots'].isEmpty) {
-        _availability[day]!['enabled'] = false;
-      }
-    });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = doctorError(e, fallback: "Couldn't load your hours.");
+      });
+    }
   }
 
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final List payload = [];
-      _availability.forEach((day, data) {
-        if (data['enabled'] && data['slots'].isNotEmpty) {
-          payload.add({'day': day, 'slots': data['slots']});
-        }
+      await ref
+          .read(doctorProfileProvider.notifier)
+          .saveAvailability(weekToJson(_week));
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _initial = _week;
       });
-      await _api.updateAvailability({'availability': payload});
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Availability updated successfully'), backgroundColor: AppTheme.success));
-      }
+      doctorToast(context, 'Hours saved');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.error));
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      doctorToast(
+        context,
+        doctorError(e, fallback: "Couldn't save your hours."),
+        error: true,
+      );
     }
+  }
+
+  Future<void> _editDay(String day) async {
+    final current = _week[day] ?? const AvailabilityDay();
+    final result = await showAvailabilityDaySheet(
+      context,
+      day: day,
+      blocks: current.blocks,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _week = {
+        ..._week,
+        day: AvailabilityDay(enabled: result.isNotEmpty, blocks: result),
+      };
+    });
+  }
+
+  void _toggleDay(String day, bool on) {
+    final current = _week[day] ?? const AvailabilityDay();
+    // Turning on a day with nothing in it: ask for the hours rather than
+    // switching on an empty day that patients still can't book.
+    if (on && current.blocks.isEmpty) {
+      _editDay(day);
+      return;
+    }
+    setState(() => _week = {..._week, day: current.copyWith(enabled: on)});
+  }
+
+  void _copyMonday() {
+    final monday = _week['monday'] ?? const AvailabilityDay();
+    if (!monday.isOpen) {
+      doctorToast(context, 'Set Monday’s hours first.');
+      return;
+    }
+    setState(() {
+      _week = {
+        ..._week,
+        for (final d in const ['tuesday', 'wednesday', 'thursday', 'friday'])
+          d: AvailabilityDay(enabled: true, blocks: [...monday.blocks]),
+      };
+    });
+    doctorToast(context, 'Monday’s hours copied to Tuesday – Friday');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        title: Text('My Availability', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        backgroundColor: Colors.white, foregroundColor: AppTheme.textPrimary, elevation: 0, surfaceTintColor: Colors.white,
-      ),
-      body: _loading 
-        ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(children: [
-              ..._days.map((day) => _buildDayCard(day)),
-              const SizedBox(height: 80),
-            ]),
-          ),
-      bottomSheet: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -5))]),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _saving ? null : _save,
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text('Save Availability', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-          ),
+    return DoctorDiscardGuard(
+      dirty: _dirty,
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        appBar: doctorSettingsAppBar('Availability'),
+        body: SafeArea(top: false, child: _body()),
+        bottomNavigationBar: doctorSaveBar(
+          dirty: _dirty,
+          saving: _saving,
+          onSave: _save,
+          label: 'Save hours',
         ),
       ),
     );
   }
 
-  Widget _buildDayCard(String day) {
-    final data = _availability[day]!;
-    final bool isEnabled = data['enabled'];
-    final List slots = data['slots'];
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-      child: Column(children: [
-        ListTile(
-          title: Text(day[0].toUpperCase() + day.substring(1), style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-          trailing: Switch(
-            value: isEnabled,
-            onChanged: (v) {
-              setState(() {
-                _availability[day]!['enabled'] = v;
-                if (v && slots.isEmpty) _addSlot(day);
-              });
-            },
-            activeColor: AppTheme.primary,
-          ),
-        ),
-        if (isEnabled) ...[
-          const Divider(height: 1),
-          ...slots.asMap().entries.map((entry) => _buildSlotRow(day, entry.key, entry.value)),
-          TextButton.icon(
-            onPressed: () => _addSlot(day),
-            icon: const Icon(CupertinoIcons.add_circled, size: 18),
-            label: Text('Add Slot', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(height: 8),
+  Widget _body() {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: AppListSkeleton(count: 7),
+      );
+    }
+    if (_error != null) {
+      // No grid on a failed load: saving over hours we never read would
+      // wipe the doctor's real week.
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          AppErrorBanner(message: _error!, onRetry: () => _load(force: true)),
         ],
-      ]),
-    );
-  }
-
-  Widget _buildSlotRow(String day, int index, Map slot) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Column(children: [
-        Row(children: [
-          Expanded(child: _buildTimePicker(day, index, 'startTime')),
-          const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('to')),
-          Expanded(child: _buildTimePicker(day, index, 'endTime')),
-          IconButton(onPressed: () => _removeSlot(day, index), icon: const Icon(CupertinoIcons.trash, size: 18, color: AppTheme.error)),
-        ]),
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: _buildTypeDropdown(day, index)),
-          const SizedBox(width: 8),
-          Expanded(child: _buildMaxPatients(day, index)),
-        ]),
-      ]),
-    );
-  }
-
-  Widget _buildTimePicker(String day, int index, String key) {
-    return InkWell(
-      onTap: () async {
-        final current = _availability[day]!['slots'][index][key].split(':');
-        final time = await showTimePicker(context: context, initialTime: TimeOfDay(hour: int.parse(current[0]), minute: int.parse(current[1])));
-        if (time != null) {
-          setState(() {
-            _availability[day]!['slots'][index][key] = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-          });
-        }
+      );
+    }
+    return RefreshIndicator(
+      color: ModuleAccent.of(context).color,
+      onRefresh: () async {
+        if (_dirty) return;
+        await _load(force: true);
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
-        child: Text(_availability[day]!['slots'][index][key], style: GoogleFonts.manrope(fontSize: 13)),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+        children: [
+          AppEntrance(child: _summary()),
+          ..._typeWarnings(),
+          const SizedBox(height: 22),
+          AppSectionTitle(
+            'Weekly hours',
+            action: 'Copy Monday to weekdays',
+            onAction: _copyMonday,
+          ),
+          AppEntrance(
+            index: 1,
+            child: AppGroup(
+              children: [
+                for (final d in kWeekDays) ...[
+                  if (d != kWeekDays.first) const AppHairline(),
+                  _dayRow(d),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Tap a day to change its hours. Changes apply to new bookings; '
+            'existing appointments stay as they are.',
+            style: AppType.sans(
+              fontSize: AppType.caption,
+              height: 1.45,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildTypeDropdown(String day, int index) {
+  Widget _summary() {
+    final minutes = weeklyMinutes(_week);
+    final types = weeklyTypes(_week);
+    final openDays = kWeekDays.where((d) => _week[d]?.isOpen ?? false).length;
+    final detail = minutes == 0
+        ? 'Patients can’t book you until you add some hours.'
+        : [
+            '$openDays ${openDays == 1 ? 'day' : 'days'}',
+            '${types.length} visit ${types.length == 1 ? 'type' : 'types'}',
+            if (_slotMinutes != null) '$_slotMinutes-min slots',
+          ].join(' · ');
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _availability[day]!['slots'][index]['type'],
-          isExpanded: true,
-          style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textPrimary),
-          items: const [
-            DropdownMenuItem(value: 'clinic', child: Text('Clinic')),
-            DropdownMenuItem(value: 'video', child: Text('Video')),
-            DropdownMenuItem(value: 'home', child: Text('Home')),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            minutes == 0 ? 'No hours set' : '${hoursLabel(minutes)} a week',
+            style: AppType.sans(
+              fontSize: AppType.figure,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+              color: minutes == 0 ? AppColors.warning : AppColors.textStrong,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            detail,
+            style: AppType.sans(
+              fontSize: AppType.caption,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A block for a type that is switched off in practice settings can never
+  /// be booked — say so instead of letting the doctor wonder.
+  List<Widget> _typeWarnings() {
+    final enabled = _enabledTypes;
+    if (enabled == null) return const [];
+    final offered = <String>{
+      for (final b
+          in _week.values.where((d) => d.isOpen).expand((d) => d.blocks))
+        if (b.type != 'all') b.type,
+    };
+    final off = offered.where((t) => !enabled.contains(t)).toList();
+    if (off.isEmpty) return const [];
+    final names = off.map((t) => apptTypeInfo(t).label.toLowerCase()).toList();
+    final list = names.length == 1
+        ? names.first
+        : '${names.take(names.length - 1).join(', ')} and ${names.last}';
+    return [
+      const SizedBox(height: 10),
+      Container(
+        padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              LucideIcons.triangleAlert,
+              size: 15,
+              color: AppColors.warning,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                'Some hours are for $list, which is turned off in practice '
+                'settings, so patients can’t book them.',
+                style: AppType.sans(
+                  fontSize: AppType.caption,
+                  height: 1.45,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
           ],
-          onChanged: (v) => setState(() => _availability[day]!['slots'][index]['type'] = v),
         ),
       ),
-    );
+    ];
   }
 
-  Widget _buildMaxPatients(String day, int index) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(8)),
-      child: TextField(
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(border: InputBorder.none, hintText: 'Max pts'),
-        style: GoogleFonts.manrope(fontSize: 13),
-        controller: TextEditingController(text: _availability[day]!['slots'][index]['maxPatients'].toString())..selection = TextSelection.collapsed(offset: _availability[day]!['slots'][index]['maxPatients'].toString().length),
-        onChanged: (v) => _availability[day]!['slots'][index]['maxPatients'] = int.tryParse(v) ?? 1,
+  Widget _dayRow(String day) {
+    final d = _week[day] ?? const AvailabilityDay();
+    final open = d.isOpen;
+    return AppPressable(
+      scale: 0.985,
+      onTap: () => _editDay(day),
+      child: Container(
+        color: Colors.transparent,
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    weekDayLabel(day),
+                    style: AppType.sans(
+                      fontSize: AppType.body,
+                      fontWeight: FontWeight.w600,
+                      color: open
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  if (!open)
+                    Text(
+                      d.blocks.isEmpty
+                          ? 'Closed'
+                          : 'Closed · ${d.blocks.length} '
+                                '${d.blocks.length == 1 ? 'block' : 'blocks'} kept',
+                      style: AppType.sans(
+                        fontSize: AppType.caption,
+                        color: AppColors.textTertiary,
+                      ),
+                    )
+                  else
+                    for (final b in d.blocks)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          blockLabel(b),
+                          style: AppType.sans(
+                            fontSize: AppType.caption,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ),
+            AppSwitch(value: open, onChanged: (v) => _toggleDay(day, v)),
+          ],
+        ),
       ),
     );
   }

@@ -5,7 +5,6 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,7 +15,11 @@ void main() {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const ProviderScope(child: AadyaProfessionalApp()));
 
-    // Verify that Splash screen appears (it has Aadya in it)
-    expect(find.textContaining('Aadya'), findsWidgets);
+    // The splash writes its wordmark in, then shows the PRO tag.
+    await tester.pump(const Duration(milliseconds: 1700));
+    expect(find.text('PRO'), findsOneWidget);
+
+    // Let the splash finish its timed hand-off so no timer is left pending.
+    await tester.pump(const Duration(seconds: 6));
   });
 }

@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../../shared/ui/app_ui.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
+import '../../doctor/widgets/availability_save_bar.dart';
+import '../../doctor/widgets/doctor_ui.dart';
+import '../../notifications/screens/notification_screen.dart';
+import '../providers/physio_profile_provider.dart';
+import '../widgets/physio_profile_widgets.dart';
 import 'physio_availability.dart';
+import 'physio_edit_profile.dart';
 import 'physio_exercises.dart';
+import 'physio_packages.dart';
+import 'physio_practice_settings.dart';
 import 'physio_service_areas.dart';
 
+/// The physiotherapist's Profile tab: who they are as patients see them,
+/// the practice tools, and account actions. Same layout as the doctor's.
 class PhysioProfile extends ConsumerStatefulWidget {
   const PhysioProfile({super.key});
 
@@ -20,134 +30,412 @@ class _PhysioProfileState extends ConsumerState<PhysioProfile> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(physioDashboardProvider.notifier).loadAll());
+    Future.microtask(() {
+      if (mounted) ref.read(physioProfileProvider.notifier).ensureLoaded();
+    });
+  }
+
+  Future<void> _refresh() =>
+      ref.read(physioProfileProvider.notifier).load(silent: true);
+
+  Future<void> _open(Widget page) async {
+    final changed = await Navigator.of(
+      context,
+    ).push<bool>(AppPageRoute(builder: (_) => page));
+    if (changed == true && mounted) _refresh();
+  }
+
+  Future<void> _help() async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'support@aadyaplus.com',
+      queryParameters: {'subject': 'Help with my physiotherapist account'},
+    );
+    var ok = false;
+    try {
+      ok = await launchUrl(uri);
+    } catch (_) {}
+    if (!ok && mounted) {
+      doctorToast(context, 'Email us at support@aadyaplus.com');
+    }
+  }
+
+  Future<void> _logout() async {
+    final ok = await AppModal.confirm(
+      context,
+      title: 'Log out?',
+      message:
+          'You will stop receiving session alerts on this phone until you log in again.',
+      icon: LucideIcons.logOut,
+      confirmLabel: 'Log out',
+    );
+    if (ok && mounted) ref.read(authProvider.notifier).logout();
   }
 
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
-    final dashData = ref.watch(physioDashboardProvider);
-    final profile = dashData.profile;
-
-    final stats = dashData.stats;
-    final rating = profile['averageRating'] ?? stats['averageRating'] ?? '0.0';
-    final isVerified = profile['verificationStatus'] == 'approved' || user?.isVerified == true;
-    
-    final exp = profile['experienceYears'] ?? profile['experience'] ?? '--';
-    final spec = (profile['specialization'] as List?)?.join(', ') ?? 'Physiotherapist';
-    final totalConsultations = profile['totalConsultations'] ?? stats['totalConsultations'] ?? '--';
-    final totalEarnings = profile['totalEarnings'] ?? stats['totalEarnings'] ?? '--';
-    
-    final earningsInfo = dashData.earnings;
-    final commissionRate = earningsInfo['commissionRate'] ?? earningsInfo['totals']?['commissionRate'] ?? 20;
-    final physioSplit = 100 - commissionRate;
+    final st = ref.watch(physioProfileProvider);
+    final profile = st.profile;
+    final firstLoad = profile.isEmpty && st.error == null;
+    final areas = physioStrings(profile['servesAreas']);
 
     return Scaffold(
-      backgroundColor: AppTheme.surface,
-      body: SingleChildScrollView(child: Column(children: [
-        Container(width: double.infinity, decoration: const BoxDecoration(gradient: AppTheme.physioGradient),
-          child: SafeArea(bottom: false, child: Column(children: [
-            const SizedBox(height: 16),
-            Container(width: 90, height: 90, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 20)]),
-              child: Center(child: Text(user?.name.substring(0, 1) ?? 'P', style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.physioAccent)))),
-            const SizedBox(height: 12),
-            Text(user?.name ?? 'Physiotherapist', style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-            Text('$spec • $exp years', style: GoogleFonts.manrope(fontSize: 13, color: Colors.white70)),
-            const SizedBox(height: 8),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                child: Row(children: [
-                  const Icon(CupertinoIcons.star, size: 14, color: Colors.amber), const SizedBox(width: 4),
-                  Text('$rating', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-                ])),
-              const SizedBox(width: 10),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: (isVerified ? AppTheme.success : AppTheme.warning).withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                child: Row(children: [
-                  Icon(isVerified ? CupertinoIcons.checkmark_seal_fill : CupertinoIcons.clock, size: 14, color: Colors.white), const SizedBox(width: 4),
-                  Text(isVerified ? 'Verified' : 'Pending', style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-                ])),
-            ]),
-            const SizedBox(height: 20),
-          ]))),
-        Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-          Row(children: [
-            _statBox('Sessions', '$totalConsultations'), const SizedBox(width: 12),
-            _statBox('Reviews', profile['totalReviews']?.toString() ?? '--'), const SizedBox(width: 12),
-            _statBox('Earnings', '₹$totalEarnings'),
-          ]),
-          const SizedBox(height: 20),
-          _infoSection('Professional', [
-            _infoRow(CupertinoIcons.doc, 'License', profile['licenseNumber'] ?? 'PT-XXXXXXXX'),
-            _infoRow(CupertinoIcons.briefcase, 'Experience', '$exp years'),
-            _infoRow(Icons.workspace_premium_outlined, 'Current Split', '$physioSplit% Earning ($commissionRate% platform fee)'),
-            _infoRow(CupertinoIcons.money_dollar_circle, 'Clinic Fee', '₹${profile['consultationFee'] ?? '0'}'),
-            _infoRow(CupertinoIcons.house, 'Home Visit', '₹${profile['homeVisitFee'] ?? '0'}'),
-          ]),
-          const SizedBox(height: 12),
-          _infoSection('Service Areas', [
-            _infoRow(CupertinoIcons.location, 'Areas', (profile['servesAreas'] as List?)?.join(', ') ?? 'No areas added'),
-          ]),
-          const SizedBox(height: 20),
-          _menuItem(CupertinoIcons.settings, 'Settings', () {}),
-          _menuItem(CupertinoIcons.checkmark_shield, 'My Availability', () {
-             Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioAvailability()));
-          }),
-          _menuItem(CupertinoIcons.waveform_path, 'Exercises Library', () {
-             Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioExercises()));
-          }),
-          _menuItem(CupertinoIcons.map, 'Service Areas', () {
-             Navigator.push(context, MaterialPageRoute(builder: (c) => const PhysioServiceAreas()));
-          }),
-          _menuItem(CupertinoIcons.chat_bubble_text, 'Help & Support', () {}),
-          const SizedBox(height: 12),
-          _menuItem(Icons.logout_outlined, 'Sign Out', () {
-            ref.read(authProvider.notifier).logout();
-            Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-          }, isDestructive: true),
-        ])),
-      ])),
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: ModuleAccent.of(context).color,
+          onRefresh: _refresh,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            children: [
+              const AppScreenHeader(
+                title: 'Profile',
+                subtitle: 'Your practice and account',
+              ),
+              const SizedBox(height: 18),
+              if (st.error != null)
+                AppErrorBanner(message: st.error!, onRetry: _refresh),
+              if (firstLoad)
+                const AppDetailSkeleton(rows: 4)
+              else if (profile.isNotEmpty)
+                AppEntrance(
+                  child: _identity(
+                    profile,
+                    name: '${profile['name'] ?? user?.name ?? ''}'.trim(),
+                  ),
+                ),
+              const SizedBox(height: 24),
+              const AppSectionTitle('Practice'),
+              AppEntrance(
+                index: 2,
+                child: AppGroup(
+                  children: [
+                    PhysioProfileTile(
+                      icon: LucideIcons.userPen,
+                      title: 'Edit profile',
+                      subtitle: 'Name, specialisations, clinic and services',
+                      onTap: () => _open(const PhysioEditProfile()),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.slidersHorizontal,
+                      title: 'Practice settings',
+                      subtitle: 'Visit types, fees and booking rules',
+                      onTap: () => _open(const PhysioPracticeSettings()),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.calendarClock,
+                      title: 'Availability',
+                      subtitle: 'Your weekly hours',
+                      onTap: () => _open(const PhysioAvailability()),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.mapPinned,
+                      title: 'Service areas',
+                      subtitle: areas.isEmpty
+                          ? 'Where you make home visits'
+                          : '${areas.length} ${areas.length == 1 ? 'area' : 'areas'} for home visits',
+                      onTap: () => _open(const PhysioServiceAreas()),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.packageOpen,
+                      title: 'Treatment packages',
+                      subtitle: 'Multi-session plans patients pay for once',
+                      onTap: () => _open(const PhysioPackages()),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.dumbbell,
+                      title: 'Exercise library',
+                      subtitle: 'Exercises you prescribe to patients',
+                      onTap: () => _open(const PhysioExercises()),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const AppSectionTitle('Account'),
+              AppEntrance(
+                index: 3,
+                child: AppGroup(
+                  children: [
+                    PhysioProfileTile(
+                      icon: LucideIcons.bell,
+                      title: 'Notifications',
+                      subtitle: 'Bookings, cancellations and updates',
+                      onTap: () => _open(
+                        ProfessionalNotificationScreen(
+                          accent: ModuleAccent.of(context).color,
+                        ),
+                      ),
+                    ),
+                    const AppHairline(),
+                    PhysioProfileTile(
+                      icon: LucideIcons.lifeBuoy,
+                      title: 'Help & support',
+                      subtitle: 'support@aadyaplus.com',
+                      onTap: _help,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 26),
+              AppEntrance(
+                index: 4,
+                child: AppSecondaryButton(
+                  label: 'Log out',
+                  icon: LucideIcons.logOut,
+                  color: AppColors.error,
+                  onPressed: _logout,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _statBox(String l, String v) => Expanded(child: Container(padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-    child: Column(children: [
-      Text(v, style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-      const SizedBox(height: 4),
-      Text(l, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
-    ])));
+  // ──────────────────────── Identity ──────────────────────────
 
-  Widget _infoSection(String t, List<Widget> c) => Container(padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(t, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-      const SizedBox(height: 12), ...c,
-    ]));
+  Widget _identity(Map<String, dynamic> p, {required String name}) {
+    final specs = physioStrings(p['specialization']).join(', ');
+    final years = int.tryParse('${p['experienceYears'] ?? ''}') ?? 0;
+    final subtitle = [
+      if (specs.isNotEmpty) specs,
+      if (years > 0) '$years ${years == 1 ? 'yr' : 'yrs'} experience',
+    ].join(' · ');
 
-  Widget _infoRow(IconData i, String l, String v) => Padding(padding: const EdgeInsets.only(bottom: 12),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: AppTheme.physioAccent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-        child: Icon(i, size: 16, color: AppTheme.physioAccent)),
-      const SizedBox(width: 12),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(l, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary)),
-        const SizedBox(height: 2),
-        Text(v, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
-      ])),
-    ]));
+    final accent = ModuleAccent.of(context).color;
+    final (
+      statusText,
+      statusTone,
+      statusIcon,
+    ) = switch ('${p['verificationStatus'] ?? ''}') {
+      'approved' => ('Verified', accent, LucideIcons.badgeCheck),
+      'rejected' || 'suspended' => (
+        'Action needed',
+        AppColors.error,
+        LucideIcons.circleAlert,
+      ),
+      'pending' => ('Under review', AppColors.warning, LucideIcons.hourglass),
+      _ => ('', AppColors.textSecondary, LucideIcons.circle),
+    };
 
-  Widget _menuItem(IconData i, String t, VoidCallback onTap, {bool isDestructive = false}) => Container(margin: const EdgeInsets.only(bottom: 8),
-    child: Material(color: Colors.white, borderRadius: BorderRadius.circular(14),
-      child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14),
-        child: Container(padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: isDestructive ? AppTheme.error.withValues(alpha: 0.2) : AppTheme.border)),
-          child: Row(children: [
-            Icon(i, size: 20, color: isDestructive ? AppTheme.error : AppTheme.textSecondary),
+    final rating = num.tryParse('${p['averageRating'] ?? ''}') ?? 0;
+    final reviews = int.tryParse('${p['totalReviews'] ?? ''}') ?? 0;
+    final sessions = int.tryParse('${p['totalConsultations'] ?? ''}') ?? 0;
+    final stats = [
+      if (rating > 0)
+        '${rating.toStringAsFixed(1)} rating${reviews > 0 ? ' ($reviews)' : ''}',
+      if (sessions > 0) '$sessions ${sessions == 1 ? 'session' : 'sessions'}',
+    ].join('  ·  ');
+
+    final address = p['clinicAddress'] is Map
+        ? Map<String, dynamic>.from(p['clinicAddress'] as Map)
+        : const <String, dynamic>{};
+    final clinic = [
+      '${address['address'] ?? ''}'.trim(),
+      '${address['city'] ?? ''}'.trim(),
+    ].where((e) => e.isNotEmpty).join(', ');
+    final licence = '${p['licenseNumber'] ?? ''}'.trim();
+    final languages = physioStrings(p['languages']).join(', ');
+    final areas = physioStrings(p['servesAreas']).join(', ');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DoctorAvatar(name: name, size: 56),
             const SizedBox(width: 14),
-            Expanded(child: Text(t, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: isDestructive ? AppTheme.error : AppTheme.textPrimary))),
-            Icon(CupertinoIcons.chevron_right, size: 18, color: isDestructive ? AppTheme.error : AppTheme.textTertiary),
-          ])))));
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.isEmpty ? 'Your name' : name,
+                    style: AppType.sans(
+                      fontSize: AppType.heading,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      color: AppColors.textStrong,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: AppType.sans(
+                        fontSize: AppType.caption,
+                        height: 1.4,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (statusText.isNotEmpty || stats.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 10,
+                      runSpacing: 4,
+                      children: [
+                        if (statusText.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(statusIcon, size: 14, color: statusTone),
+                              const SizedBox(width: 5),
+                              Text(
+                                statusText,
+                                style: AppType.sans(
+                                  fontSize: AppType.caption,
+                                  fontWeight: FontWeight.w600,
+                                  color: statusTone,
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (stats.isNotEmpty)
+                          Text(
+                            stats,
+                            style: AppType.sans(
+                              fontSize: AppType.caption,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            AppPressable(
+              onTap: () => _open(const PhysioEditProfile()),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 0, 4),
+                child: Text(
+                  'Edit',
+                  style: AppType.sans(
+                    fontSize: AppType.body,
+                    fontWeight: FontWeight.w600,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_statusNote(p) case final note?) ...[
+          const SizedBox(height: 14),
+          note,
+        ],
+        const SizedBox(height: 18),
+        AppGroup(
+          children: [
+            _dataRow(LucideIcons.fileBadge, 'Registration no.', licence),
+            const AppHairline(),
+            _dataRow(LucideIcons.building2, 'Clinic', clinic),
+            if (languages.isNotEmpty) ...[
+              const AppHairline(),
+              _dataRow(LucideIcons.languages, 'Languages', languages),
+            ],
+            const AppHairline(),
+            _dataRow(
+              LucideIcons.mapPin,
+              'Service areas',
+              areas,
+              optional: true,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// One line on what verification means for bookings, only when it is not
+  /// yet done.
+  Widget? _statusNote(Map<String, dynamic> p) {
+    final text = switch ('${p['verificationStatus'] ?? ''}') {
+      'pending' =>
+        'Our team is checking your registration. Patients can book you once '
+            'you’re verified — set up your hours, fees and packages in the '
+            'meantime.',
+      'rejected' =>
+        'We couldn’t verify your registration. Check your details or contact '
+            'support to resubmit.',
+      'suspended' =>
+        'Your profile is suspended and hidden from patients. Contact support '
+            'to restore it.',
+      _ => null,
+    };
+    if (text == null) return null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        style: AppType.sans(
+          fontSize: AppType.caption,
+          height: 1.45,
+          color: AppColors.textSecondary,
+        ),
+      ),
+    );
+  }
+
+  /// A missing registration or clinic says "Not set" in amber; service
+  /// areas are optional, so missing ones are just grey.
+  Widget _dataRow(
+    IconData icon,
+    String label,
+    String value, {
+    bool optional = false,
+  }) {
+    final missing = value.isEmpty;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textHeading),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: AppType.sans(
+              fontSize: AppType.body,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              missing ? 'Not set' : value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: AppType.sans(
+                fontSize: AppType.body,
+                fontWeight: FontWeight.w600,
+                color: missing && !optional
+                    ? AppColors.warning
+                    : (missing
+                          ? AppColors.textTertiary
+                          : AppColors.textSecondary),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

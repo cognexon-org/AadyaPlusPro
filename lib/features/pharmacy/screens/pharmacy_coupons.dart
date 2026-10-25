@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/pharmacy_type.dart';
-import '../../../core/network/api_service.dart';
 import '../theme/pharmacy_colors.dart';
+import '../providers/pharmacy_profile_provider.dart';
 import '../widgets/pharmacy_ui.dart';
 
 class PharmacyCoupons extends ConsumerStatefulWidget {
@@ -13,41 +13,15 @@ class PharmacyCoupons extends ConsumerStatefulWidget {
 }
 
 class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
-  bool _loading = false;
-  List<Map<String, dynamic>> _coupons = [];
-
   @override
   void initState() {
     super.initState();
-    Future.microtask(_load);
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final r = await ApiService().getMerchantCoupons();
-      final d = Map<String, dynamic>.from(r.data as Map);
-      if (!mounted) return;
-      setState(() {
-        _coupons = (d['coupons'] as List? ?? const [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-      });
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              pharmacyErrorMessage(e, fallback: 'Couldn\'t load coupons.'),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            backgroundColor: PharmacyColors.error,
-          ),
-        );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    Future.microtask(() {
+      final cached = ref.read(pharmacyProfileProvider).coupons;
+      ref
+          .read(pharmacyProfileProvider.notifier)
+          .loadCoupons(silent: cached.isNotEmpty);
+    });
   }
 
   Future<void> _addCoupon() async {
@@ -64,9 +38,9 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'New Coupon',
+              'New coupon',
               style: PharmacyType.sans(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: PharmacyColors.textPrimary,
               ),
@@ -80,13 +54,13 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
                     PharmacyTextField(
                       label: 'Code',
                       controller: code,
-                      icon: CupertinoIcons.tag,
+                      icon: LucideIcons.tag,
                       required: true,
                     ),
                     PharmacyDropdownField<String>(
                       label: 'Discount Type',
                       value: type,
-                      icon: CupertinoIcons.percent,
+                      icon: LucideIcons.percent,
                       items: const [
                         DropdownMenuItem(
                           value: 'percent',
@@ -99,14 +73,14 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
                     PharmacyTextField(
                       label: 'Discount Value',
                       controller: value,
-                      icon: CupertinoIcons.money_dollar,
+                      icon: LucideIcons.indianRupee,
                       isNum: true,
                       required: true,
                     ),
                     PharmacyTextField(
                       label: 'Minimum Order',
                       controller: minOrder,
-                      icon: CupertinoIcons.cart,
+                      icon: LucideIcons.shoppingCart,
                       isNum: true,
                     ),
                     PharmacyPickerField(
@@ -155,17 +129,51 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
         ),
       ),
     );
-    if (ok != true || code.text.trim().isEmpty) return;
+    if (ok != true || !mounted) return;
+    final amount = double.tryParse(value.text.trim()) ?? 0;
+    final problem = code.text.trim().isEmpty
+        ? 'Enter a coupon code.'
+        : amount <= 0
+        ? 'Enter a discount value above zero.'
+        : type == 'percent' && amount > 100
+        ? 'A percentage discount cannot be more than 100%.'
+        : null;
+    if (problem != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(problem),
+          backgroundColor: PharmacyColors.warning,
+        ),
+      );
+      return;
+    }
     try {
-      await ApiService().createMerchantCoupon({
+      await ref.read(pharmacyProfileProvider.notifier).createCoupon({
         'code': code.text.trim().toUpperCase(),
         'discountType': type,
-        'value': double.tryParse(value.text) ?? 0,
+        'value': amount,
         'minOrderAmount': double.tryParse(minOrder.text) ?? 0,
         'isActive': true,
-        if (endsAt != null) 'endsAt': endsAt!.toIso8601String(),
+        // End of the chosen day — the picker returns midnight, which expired
+        // the coupon at the very start of the day the pharmacist picked.
+        if (endsAt != null)
+          'endsAt': DateTime(
+            endsAt!.year,
+            endsAt!.month,
+            endsAt!.day,
+            23,
+            59,
+            59,
+          ).toIso8601String(),
       });
-      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Coupon created'),
+            backgroundColor: PharmacyColors.success,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -186,10 +194,9 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
 
   Future<void> _toggleCoupon(Map<String, dynamic> c, bool value) async {
     try {
-      await ApiService().updateMerchantCoupon('${c['_id']}', {
-        'isActive': value,
-      });
-      await _load();
+      await ref
+          .read(pharmacyProfileProvider.notifier)
+          .toggleCoupon('${c['_id']}', value);
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,6 +217,10 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
 
   @override
   Widget build(BuildContext context) {
+    final profileState = ref.watch(pharmacyProfileProvider);
+    final coupons = profileState.coupons;
+    final isLoading = profileState.isCouponsLoading && coupons.isEmpty;
+
     return Scaffold(
       backgroundColor: PharmacyColors.bg,
       appBar: AppBar(
@@ -220,7 +231,7 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
         title: Text(
           'Coupons',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
@@ -229,14 +240,14 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
           TextButton.icon(
             onPressed: _addCoupon,
             icon: const Icon(
-              CupertinoIcons.add,
+              LucideIcons.plus,
               size: 18,
               color: PharmacyColors.green,
             ),
             label: Text(
               'Add',
               style: PharmacyType.sans(
-                fontSize: 13.5,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: PharmacyColors.green,
               ),
@@ -249,68 +260,74 @@ class _PharmacyCouponsState extends ConsumerState<PharmacyCoupons> {
         // the bottom inset, so content and buttons clear the device
         // gesture bar.
         top: false,
-        child: _loading
+        child: isLoading
             ? ListView(
                 padding: const EdgeInsets.all(16),
                 children: const [PharmacyListSkeleton(count: 4)],
               )
             : RefreshIndicator(
                 color: PharmacyColors.green,
-                onRefresh: _load,
+                onRefresh: () => ref
+                    .read(pharmacyProfileProvider.notifier)
+                    .loadCoupons(force: true),
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    if (_coupons.isEmpty)
+                    if (coupons.isEmpty)
                       const PharmacyEmptyStateInline(
-                        icon: CupertinoIcons.tag,
+                        icon: LucideIcons.tag,
                         text: 'No coupons configured.',
                       ),
-                    ..._coupons.map((c) {
+                    ...coupons.indexed.map((entry) {
+                      final (index, c) = entry;
                       final discount = c['discountType'] == 'percent'
                           ? '${c['value']}% off'
-                          : '₹${c['value']} off';
+                          : '${pharmacyRupees(c['value'])} off';
                       final validTill = c['endsAt'] != null
                           ? DateTime.tryParse('${c['endsAt']}')
                           : null;
-                      return PharmacyCard(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${c['code'] ?? 'COUPON'}',
-                                    style: PharmacyType.sans(
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: PharmacyColors.textPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '$discount · Min ₹${c['minOrderAmount'] ?? 0}',
-                                    style: PharmacyType.sans(
-                                      fontSize: 12,
-                                      color: PharmacyColors.textSecondary,
-                                    ),
-                                  ),
-                                  if (validTill != null)
+                      return PharmacyEntrance(
+                        index: index,
+                        child: PharmacyCard(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                     Text(
-                                      'Valid till ${validTill.day}/${validTill.month}/${validTill.year}',
+                                      '${c['code'] ?? 'COUPON'}',
                                       style: PharmacyType.sans(
-                                        fontSize: 11,
-                                        color: PharmacyColors.textTertiary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: PharmacyColors.textPrimary,
                                       ),
                                     ),
-                                ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$discount · Min ${pharmacyRupees(c['minOrderAmount'])}',
+                                      style: PharmacyType.sans(
+                                        fontSize: 11.5,
+                                        color: PharmacyColors.textSecondary,
+                                      ),
+                                    ),
+                                    if (validTill != null)
+                                      Text(
+                                        'Valid till ${validTill.day}/${validTill.month}/${validTill.year}',
+                                        style: PharmacyType.sans(
+                                          fontSize: 11.5,
+                                          color: PharmacyColors.textTertiary,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            PharmacySwitch(
-                              value: c['isActive'] != false,
-                              onChanged: (v) => _toggleCoupon(c, v),
-                            ),
-                          ],
+                              PharmacySwitch(
+                                value: c['isActive'] != false,
+                                onChanged: (v) => _toggleCoupon(c, v),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     }),

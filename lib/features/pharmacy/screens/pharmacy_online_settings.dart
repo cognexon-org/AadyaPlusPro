@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/network/api_service.dart';
 import '../providers/pharmacy_store_provider.dart';
+import '../providers/pharmacy_profile_provider.dart';
 import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
@@ -48,7 +49,6 @@ class _PharmacyOnlineSettingsState
 
   /// When the store resumes taking orders. Null while it is open.
   DateTime? _pausedUntil;
-  String? _loadedStoreId;
 
   /// The settings exactly as the server last gave them to us. [_dirty] is the
   /// comparison against this, which is what drives the save bar.
@@ -60,7 +60,22 @@ class _PharmacyOnlineSettingsState
     for (final c in [_minOrder, _deliveryFee, _freeDelivery, _eta, _pincodes]) {
       c.addListener(_onFormChanged);
     }
-    Future.microtask(_load);
+    final cached = ref.read(pharmacyProfileProvider).onlineSettings;
+    final store =
+        ref.read(pharmacyStoreProvider).selectedStore ??
+        const <String, dynamic>{};
+    final initialMap = cached.isNotEmpty
+        ? cached
+        : Map<String, dynamic>.from((store['ecommerce'] as Map?) ?? const {});
+    if (initialMap.isNotEmpty) {
+      _populateEcommerce(
+        initialMap,
+        ref.read(pharmacyStoreProvider).selectedStoreId,
+      );
+      Future.microtask(() => _load(silent: true));
+    } else {
+      Future.microtask(() => _load());
+    }
   }
 
   @override
@@ -111,53 +126,141 @@ class _PharmacyOnlineSettingsState
     return false;
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  /// Fetches the live settings.
+  ///
+  /// A background refresh never overwrites edits in progress: the screen
+  /// paints from cache and refreshes silently on open, and applying that
+  /// response unconditionally wiped whatever had been typed in the meantime.
+  /// While the form is dirty only the pause state — which is not part of the
+  /// form — is taken from the server.
+  ///
+  /// [force] applies the response even over unsaved edits — only after the
+  /// user has agreed to discard them.
+  Future<void> _load({bool silent = false, bool force = false}) async {
+    if (!silent && _saved.isEmpty) {
+      setState(() => _loading = true);
+    }
     try {
-      await ref.read(pharmacyStoreProvider.notifier).initialize(force: true);
       final state = ref.read(pharmacyStoreProvider);
-      final store = state.selectedStore ?? const <String, dynamic>{};
-      final ecommerce = Map<String, dynamic>.from(
-        (store['ecommerce'] as Map?) ?? const {},
-      );
-      if (!mounted) return;
-      setState(() {
-        _loadedStoreId = state.selectedStoreId;
-        _enabled = ecommerce['enabled'] != false;
-        _cod = ecommerce['codEnabled'] != false;
-        _online = ecommerce['onlinePaymentEnabled'] != false;
-        _returns = ecommerce['allowReturns'] != false;
-        _pausedUntil = DateTime.tryParse('${ecommerce['pausedUntil'] ?? ''}');
-        _minOrder.text = '${ecommerce['minOrderAmount'] ?? 0}';
-        _deliveryFee.text = '${ecommerce['deliveryFee'] ?? 0}';
-        _freeDelivery.text = '${ecommerce['freeDeliveryThreshold'] ?? 0}';
-        _eta.text = '${ecommerce['estimatedDeliveryMinutes'] ?? 120}';
-        _pincodes.text = (ecommerce['serviceablePincodes'] as List? ?? const [])
-            .join(', ');
-        _loading = false;
-      });
-      setState(() => _saved = _payload);
+      Map<String, dynamic> ecommerce = const {};
+
+      final res = await ApiService().getMerchantSettings();
+      final body = res.data;
+      Map<String, dynamic> raw = const {};
+      if (body is Map) {
+        final inner =
+            body['settings'] ?? body['ecommerce'] ?? body['data'] ?? body;
+        if (inner is Map) {
+          raw = Map<String, dynamic>.from(inner);
+        }
+      }
+      if (raw.isNotEmpty) {
+        ecommerce = raw;
+        ref
+            .read(pharmacyProfileProvider.notifier)
+            .updateOnlineSettings(ecommerce);
+      }
+      if (!mounted || ecommerce.isEmpty) return;
+      if (_dirty && !force) {
+        setState(() {
+          _pausedUntil = DateTime.tryParse('${ecommerce['pausedUntil'] ?? ''}');
+        });
+        return;
+      }
+      _applyEcommerce(ecommerce, state.selectedStoreId);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      _toast(
-        "Couldn't load your online store settings. Pull down to try again.",
-        PharmacyColors.error,
-      );
+      if (_saved.isEmpty) {
+        setState(() => _loading = false);
+        _toast(
+          "Couldn't load your online store settings. Pull down to try again.",
+          PharmacyColors.error,
+        );
+      }
     }
   }
 
+  void _populateEcommerce(Map<String, dynamic> ecommerce, String? storeId) {
+    _enabled = ecommerce['enabled'] != false;
+    _cod = ecommerce['codEnabled'] != false;
+    _online = ecommerce['onlinePaymentEnabled'] != false;
+    _returns = ecommerce['allowReturns'] != false;
+    _pausedUntil = DateTime.tryParse('${ecommerce['pausedUntil'] ?? ''}');
+    _minOrder.text = '${ecommerce['minOrderAmount'] ?? 0}';
+    _deliveryFee.text = '${ecommerce['deliveryFee'] ?? 0}';
+    _freeDelivery.text = '${ecommerce['freeDeliveryThreshold'] ?? 0}';
+    _eta.text = '${ecommerce['estimatedDeliveryMinutes'] ?? 120}';
+    _pincodes.text = (ecommerce['serviceablePincodes'] as List? ?? const [])
+        .join(', ');
+    _saved = _payload;
+    _loading = false;
+  }
+
+  void _applyEcommerce(Map<String, dynamic> ecommerce, String? storeId) {
+    if (mounted) {
+      setState(() {
+        _populateEcommerce(ecommerce, storeId);
+      });
+    } else {
+      _populateEcommerce(ecommerce, storeId);
+    }
+  }
+
+  /// Returns the first problem with the form, or null.
+  String? get _problem {
+    // With both off, the store stays listed but no customer can check out.
+    if (_enabled && !_cod && !_online) {
+      return 'Turn on cash on delivery or online payment — customers need at least one way to pay.';
+    }
+    final bad = _parsedPincodes
+        .where((p) => !RegExp(r'^\d{6}$').hasMatch(p))
+        .toList();
+    if (bad.isNotEmpty) {
+      return bad.length == 1
+          ? '"${bad.first}" is not a valid pincode — a pincode is 6 digits.'
+          : '${bad.length} pincodes are not 6 digits: ${bad.take(3).join(', ')}${bad.length > 3 ? '…' : ''}';
+    }
+    return null;
+  }
+
+  /// Pull-to-refresh reloads from the server, which replaces the form — so
+  /// unsaved edits are confirmed away first rather than silently dropped.
+  Future<void> _refresh() async {
+    if (_dirty) {
+      final discard = await _confirmDiscard();
+      if (!discard || !mounted) return;
+    }
+    await _load(silent: true, force: true);
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (!_dirty) return true;
+    return PharmacyDialog.confirm(
+      context,
+      title: 'Discard changes?',
+      message: "Your online store changes haven't been saved yet.",
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+    );
+  }
+
   Future<void> _save() async {
+    final problem = _problem;
+    if (problem != null) {
+      _toast(problem, PharmacyColors.error);
+      return;
+    }
     setState(() => _saving = true);
     try {
       await ApiService().updateMerchantSettings(_payload);
+      ref.read(pharmacyProfileProvider.notifier).updateOnlineSettings(_payload);
       if (!mounted) return;
       setState(() {
         _saved = _payload;
         _saving = false;
       });
       _toast('Online store settings saved', PharmacyColors.success);
-      await _load();
+      _load(silent: true);
     } on DioException catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -181,7 +284,7 @@ class _PharmacyOnlineSettingsState
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
@@ -193,13 +296,27 @@ class _PharmacyOnlineSettingsState
 
   @override
   Widget build(BuildContext context) {
-    final store = ref.watch(pharmacyStoreProvider);
-    if (store.selectedStoreId != null &&
-        store.selectedStoreId != _loadedStoreId &&
-        !_loading) {
-      Future.microtask(_load);
-    }
+    // Settings are per branch: switching branch while this screen is open
+    // has to replace the form, not keep showing the previous branch's values.
+    ref.listen<String?>(
+      pharmacyStoreProvider.select((s) => s.selectedStoreId),
+      (previous, next) {
+        if (previous != next && next != null) _load(force: true);
+      },
+    );
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _confirmDiscard() && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: _scaffold(),
+    );
+  }
 
+  Widget _scaffold() {
     return Scaffold(
       backgroundColor: PharmacyColors.bg,
       appBar: AppBar(
@@ -208,28 +325,24 @@ class _PharmacyOnlineSettingsState
         surfaceTintColor: Colors.transparent,
         iconTheme: const IconThemeData(color: PharmacyColors.textPrimary),
         title: Text(
-          'Online Store',
+          'Online store',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w700,
             color: PharmacyColors.textPrimary,
           ),
         ),
-        // Loading is shown as a shaped skeleton in the body, not a bar.
       ),
       body: SafeArea(
-        // An AppBar already covers the status bar; this is here for
-        // the bottom inset, so content and buttons clear the device
-        // gesture bar.
         top: false,
-        child: _loading
+        child: _loading && _saved.isEmpty
             ? const Padding(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: PharmacyFormSkeleton(fields: 5),
               )
             : RefreshIndicator(
                 color: PharmacyColors.green,
-                onRefresh: _load,
+                onRefresh: _refresh,
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
@@ -261,97 +374,85 @@ class _PharmacyOnlineSettingsState
                     ]),
                     const SizedBox(height: 22),
                     _label('DELIVERY AREA'),
-                    _group([
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(13, 13, 13, 6),
-                        child: PharmacyTextField(
-                          label: 'Serviceable pincodes',
-                          controller: _pincodes,
-                          icon: LucideIcons.mapPin,
-                          hint: '400001, 400002, 400003',
-                          margin: EdgeInsets.zero,
-                        ),
-                      ),
-                      _pincodePreview(),
-                    ]),
+                    // Fields sit on the white page: a grey field inside a grey
+                    // panel has no visible edge and reads as plain text.
+                    PharmacyTextField(
+                      label: 'Serviceable pincodes',
+                      controller: _pincodes,
+                      icon: LucideIcons.mapPin,
+                      hint: '400001, 400002, 400003',
+                      margin: const EdgeInsets.only(bottom: 4),
+                    ),
+                    _pincodePreview(),
                     const SizedBox(height: 22),
                     _label('CHARGES & TIMING'),
-                    _group([
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(13, 13, 13, 0),
-                        child: Column(
+                    Column(
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: PharmacyTextField(
-                                    label: 'Minimum order (₹)',
-                                    controller: _minOrder,
-                                    icon: LucideIcons.shoppingBag,
-                                    isNum: true,
-                                    margin: const EdgeInsets.only(bottom: 12),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: PharmacyTextField(
-                                    label: 'Delivery fee (₹)',
-                                    controller: _deliveryFee,
-                                    icon: LucideIcons.truck,
-                                    isNum: true,
-                                    margin: const EdgeInsets.only(bottom: 12),
-                                  ),
-                                ),
-                              ],
+                            Expanded(
+                              child: PharmacyTextField(
+                                label: 'Minimum order (₹)',
+                                controller: _minOrder,
+                                icon: LucideIcons.shoppingBag,
+                                isNum: true,
+                                margin: const EdgeInsets.only(bottom: 12),
+                              ),
                             ),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: PharmacyTextField(
-                                    label: 'Free delivery above (₹)',
-                                    controller: _freeDelivery,
-                                    icon: LucideIcons.ticketPercent,
-                                    isNum: true,
-                                    margin: const EdgeInsets.only(bottom: 13),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: PharmacyTextField(
-                                    label: 'Delivery time (min)',
-                                    controller: _eta,
-                                    icon: LucideIcons.timer,
-                                    isNum: true,
-                                    margin: const EdgeInsets.only(bottom: 13),
-                                  ),
-                                ),
-                              ],
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: PharmacyTextField(
+                                label: 'Delivery fee (₹)',
+                                controller: _deliveryFee,
+                                icon: LucideIcons.truck,
+                                isNum: true,
+                                margin: const EdgeInsets.only(bottom: 12),
+                              ),
                             ),
                           ],
                         ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: PharmacyTextField(
+                                label: 'Free delivery above (₹)',
+                                controller: _freeDelivery,
+                                icon: LucideIcons.ticketPercent,
+                                isNum: true,
+                                margin: const EdgeInsets.only(bottom: 13),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: PharmacyTextField(
+                                label: 'Delivery time (min)',
+                                controller: _eta,
+                                icon: LucideIcons.timer,
+                                isNum: true,
+                                margin: const EdgeInsets.only(bottom: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    _group([_chargesSummary()]),
+                    const SizedBox(height: 22),
+                    _label('PROMOTIONS'),
+                    _group([
+                      _linkRow(
+                        LucideIcons.ticketPercent,
+                        'Manage coupons',
+                        'Discount codes customers can apply at checkout',
+                        () => Navigator.of(context).push(
+                          PharmacyPageRoute(
+                            builder: (_) => const PharmacyCoupons(),
+                          ),
+                        ),
                       ),
-                      _hairline,
-                      _chargesSummary(),
                     ]),
-                    // Merchant-funded coupons are commented out: in a
-                    // marketplace the platform runs promotions, not each
-                    // store. The coupons screen and endpoints are untouched.
-                    // const SizedBox(height: 22),
-                    // _label('MORE'),
-                    // _group([
-                    //   _linkRow(
-                    //     LucideIcons.ticketPercent,
-                    //     'Manage coupons',
-                    //     'Discount codes customers can apply at checkout',
-                    //     () => Navigator.of(context).push(
-                    //       MaterialPageRoute(
-                    //         builder: (_) => const PharmacyCoupons(),
-                    //       ),
-                    //     ),
-                    //   ),
-                    // ]),
                   ],
                 ),
               ),
@@ -401,13 +502,8 @@ class _PharmacyOnlineSettingsState
     return Container(
       padding: const EdgeInsets.fromLTRB(15, 14, 13, 15),
       decoration: BoxDecoration(
-        color: live
-            ? PharmacyColors.greenVeryLight
-            : PharmacyColors.bgSecondary,
+        color: PharmacyColors.panel,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: live ? PharmacyColors.greenLight : PharmacyColors.borderStrong,
-        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -417,7 +513,7 @@ class _PharmacyOnlineSettingsState
             height: 38,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: live ? PharmacyColors.greenLight : PharmacyColors.border,
+              color: PharmacyColors.bg,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -446,7 +542,7 @@ class _PharmacyOnlineSettingsState
                           ? 'Accepting online orders'
                           : 'Not accepting orders',
                       style: PharmacyType.sans(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: PharmacyColors.textStrong,
                       ),
@@ -493,7 +589,7 @@ class _PharmacyOnlineSettingsState
                   child: Text(
                     'Not taking orders until ${_pauseLabel()}',
                     style: PharmacyType.sans(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w600,
                       color: PharmacyColors.warning,
                     ),
@@ -566,7 +662,7 @@ class _PharmacyOnlineSettingsState
                 ? 'Delivering to 1 pincode only'
                 : 'Delivering to ${codes.length} pincodes only',
             style: PharmacyType.sans(
-              fontSize: 11,
+              fontSize: 11.5,
               fontWeight: FontWeight.w600,
               color: PharmacyColors.textTertiary,
             ),
@@ -583,16 +679,15 @@ class _PharmacyOnlineSettingsState
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: PharmacyColors.greenVeryLight,
+                    color: PharmacyColors.panel,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: PharmacyColors.greenLight),
                   ),
                   child: Text(
                     code,
                     style: PharmacyType.number(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: PharmacyColors.greenDark,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: PharmacyColors.textPrimary,
                     ),
                   ),
                 ),
@@ -614,15 +709,15 @@ class _PharmacyOnlineSettingsState
 
     final parts = <String>[
       if (minOrder > 0)
-        'Orders below ₹${minOrder.toStringAsFixed(0)} are not accepted'
+        'Orders below ${pharmacyRupees(minOrder)} are not accepted'
       else
         'No minimum order',
       if (fee <= 0)
         'delivery is free'
       else if (free > 0)
-        'delivery ₹${fee.toStringAsFixed(0)}, free above ₹${free.toStringAsFixed(0)}'
+        'delivery ${pharmacyRupees(fee)}, free above ${pharmacyRupees(free)}'
       else
-        'delivery ₹${fee.toStringAsFixed(0)}',
+        'delivery ${pharmacyRupees(fee)}',
       if (eta > 0) 'arriving in about $eta min',
     ];
 
@@ -690,7 +785,7 @@ class _PharmacyOnlineSettingsState
               child: Text(
                 'Unsaved changes',
                 style: PharmacyType.sans(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -713,32 +808,11 @@ class _PharmacyOnlineSettingsState
 
   // ────────────────────────── Section chrome ───────────────────────
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 
-  Widget _group(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
+  Widget _group(List<Widget> children) => PharmacyGroup(children: children);
 
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
+  static Widget get _hairline => const PharmacyHairline();
 
   Widget _switchRow(
     String label,
@@ -781,7 +855,7 @@ class _PharmacyOnlineSettingsState
                   Text(
                     label,
                     style: PharmacyType.sans(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: PharmacyColors.textPrimary,
                     ),
@@ -790,7 +864,7 @@ class _PharmacyOnlineSettingsState
                   Text(
                     subtitle,
                     style: PharmacyType.sans(
-                      fontSize: 11,
+                      fontSize: 11.5,
                       color: PharmacyColors.textTertiary,
                     ),
                   ),

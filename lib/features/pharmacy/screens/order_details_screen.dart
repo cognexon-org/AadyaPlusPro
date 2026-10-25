@@ -1,8 +1,13 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/network/api_service.dart';
@@ -10,8 +15,11 @@ import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
 import 'pharmacy_orders.dart' show orderStatusLabel;
+import '../providers/pharmacy_orders_provider.dart';
 import '../widgets/collect_payment_sheet.dart';
+import '../widgets/delivery_sheets.dart';
 import '../widgets/order_action_sheets.dart';
+import '../widgets/prescription_review.dart';
 import 'prescription_details_screen.dart';
 
 /// Full order-detail screen, reached by tapping a row in the Orders list.
@@ -19,15 +27,15 @@ import 'prescription_details_screen.dart';
 /// Laid out as labelled hairline groups, the same idiom as Home and the
 /// settings screens, so a pharmacist reads it the way they read the rest of
 /// the module: a section label, then rows.
-class OrderDetailsScreen extends StatefulWidget {
+class OrderDetailsScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> order;
   const OrderDetailsScreen({super.key, required this.order});
 
   @override
-  State<OrderDetailsScreen> createState() => _OrderDetailsScreenState();
+  ConsumerState<OrderDetailsScreen> createState() => _OrderDetailsScreenState();
 }
 
-class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+class _OrderDetailsScreenState extends ConsumerState<OrderDetailsScreen> {
   final _api = ApiService();
   final _noteController = TextEditingController();
   late Map<String, dynamic> _order = widget.order;
@@ -37,9 +45,37 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   Map<String, dynamic> _settlement = const {};
   bool _busy = false;
 
+  /// Opened from a notification with only an id: nothing real to paint
+  /// until the fetch lands, so a skeleton shows instead of a ₹0 order.
+  late bool _waiting = !_hasBody(_order);
+  String? _loadError;
+
+  static bool _hasBody(Map<String, dynamic> o) => o['items'] is List;
+
+  /// The app usually already holds this order — from the Orders list, the
+  /// live poll or an earlier visit — so use that and paint at once.
+  Map<String, dynamic>? _fromMemory() {
+    final s = ref.read(pharmacyOrdersProvider);
+    final cached = s.orderDetailsCache[_id];
+    if (cached != null && _hasBody(cached)) return cached;
+    for (final list in [s.orders, s.awaitingOrders, s.allOrders]) {
+      for (final o in list) {
+        if ('${o['_id']}' == _id && _hasBody(o)) return o;
+      }
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
+    if (_waiting) {
+      final known = _fromMemory();
+      if (known != null) {
+        _order = known;
+        _waiting = false;
+      }
+    }
     // The list hands over a summary row: no populated prescription, no
     // settlement preview, and on some endpoints no batch allocations. Without
     // this fetch the screen silently renders whatever the list happened to
@@ -71,12 +107,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         if (data is Map && data['settlement'] is Map) {
           _settlement = Map<String, dynamic>.from(data['settlement'] as Map);
         }
+        _waiting = !_hasBody(_order);
+        _loadError = _waiting ? "Couldn't load this order." : null;
       });
-    } on DioException {
-      // Keep the summary row rather than replacing the screen with an error:
-      // everything the list gave us is still valid and still actionable.
+      if (mounted && !_waiting) {
+        ref.read(pharmacyOrdersProvider.notifier).upsertOrder(_order);
+      }
+    } catch (e) {
+      // With a summary row on screen, keep it: everything the list gave us
+      // is still valid and actionable. With nothing yet, say what failed.
+      if (mounted && _waiting) {
+        setState(
+          () => _loadError = e is DioException
+              ? _message(e)
+              : "Couldn't load this order.",
+        );
+      }
     }
   }
+
+  Widget _waitingBody() => SafeArea(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+      children: [
+        if (_loadError == null)
+          const PharmacyDetailSkeleton(rows: 7)
+        else
+          PharmacyErrorBanner(
+            message: _loadError!,
+            onRetry: () {
+              setState(() => _loadError = null);
+              _load();
+            },
+          ),
+      ],
+    ),
+  );
 
   Map<String, dynamic> get _patient => _map(_order['patientId']);
   Map<String, dynamic> get _address => _map(_order['deliveryAddress']);
@@ -96,7 +162,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     const map = {
       'confirmed': 'packing',
       'packing': 'ready_to_ship',
-      'ready_to_ship': 'shipped',
+      'ready_to_ship': 'out_for_delivery',
       'shipped': 'out_for_delivery',
       'out_for_delivery': 'delivered',
     };
@@ -131,11 +197,25 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       );
       if (!proceed || !mounted) return;
     }
+    Map<String, dynamic>? checklist;
+    if (approved) {
+      final rx = _map(_order['prescriptionId']);
+      final doctor = _map(rx['doctorId']);
+      final prescriber = doctor.isNotEmpty ? doctor : _map(rx['physioId']);
+      checklist = await showPrescriptionChecklist(
+        context,
+        prescriberName: prescriber['name']?.toString(),
+        registration: prescriber['licenseNumber']?.toString(),
+        issuedOn: DateTime.tryParse('${rx['issuedAt'] ?? ''}')?.toLocal(),
+      );
+      if (checklist == null || !mounted) return;
+    }
     await _run(
       () => _api.reviewMerchantPrescription(
         _id,
         approved: approved,
         reason: note,
+        checklist: checklist,
       ),
       approved
           ? 'Prescription approved — the order can now be confirmed'
@@ -186,7 +266,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final items = _maps(_order['items']);
     final availability = await showPharmacySheet<Map<String, int>>(
       context,
-      builder: (_) => OrderAvailabilitySheet(items: items),
+      builder: (_) => OrderAvailabilitySheet(
+        items: items,
+        orderId: _id,
+        customerPhone: '${_address['phone'] ?? _patient['phone'] ?? ''}',
+      ),
     );
     if (availability == null || !mounted) return;
 
@@ -228,10 +312,33 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     );
   }
 
-  Future<void> _advance(String status) async => _run(
-    () => _api.updateMerchantOrderStatus(_id, status),
-    'Order moved to ${orderStatusLabel(status)}',
-  );
+  Map<String, dynamic> get _delivery => _map(_order['delivery']);
+
+  /// Packed → hand to driver (asks who), out for delivery → delivered
+  /// (confirms cash on a COD order); other steps go straight through.
+  Future<void> _advance(String status) async {
+    final extra = await prepareDeliveryStep(context, _order, status);
+    if (extra == null || !mounted) return;
+    await _run(
+      () => _api.updateMerchantOrderStatus(_id, status, extra: extra),
+      status == 'out_for_delivery'
+          ? 'Handed to driver — customer notified'
+          : status == 'delivered'
+          ? 'Delivered — customer notified'
+          : 'Order moved to ${orderStatusLabel(status)}',
+    );
+  }
+
+  /// The driver couldn't deliver: back to packed, ready to hand over again.
+  Future<void> _deliveryFailed() async {
+    final reason = await askDeliveryFailure(context);
+    if (reason == null || !mounted) return;
+    await _run(
+      () =>
+          _api.updateMerchantOrderStatus(_id, 'ready_to_ship', reason: reason),
+      'Back at the store — hand it over again when ready',
+    );
+  }
 
   Future<void> _run(Future<Response> Function() action, String success) async {
     if (_id.isEmpty || _busy) return;
@@ -249,11 +356,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         }
         _busy = false;
       });
+      ref.read(pharmacyOrdersProvider.notifier).upsertOrder(_order);
       _toast(success, PharmacyColors.success);
-    } on DioException catch (e) {
+    } catch (e) {
+      // Any failure, not only a network one, must release the buttons — a
+      // parsing error used to leave the screen stuck with every action off.
       if (!mounted) return;
       setState(() => _busy = false);
-      _toast(_message(e), PharmacyColors.error);
+      _toast(
+        e is DioException
+            ? _message(e)
+            : pharmacyErrorMessage(e, fallback: 'Something went wrong.'),
+        PharmacyColors.error,
+      );
     }
   }
 
@@ -277,9 +392,54 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             _settlement = Map<String, dynamic>.from(data['settlement'] as Map);
           }
         });
+        ref.read(pharmacyOrdersProvider.notifier).upsertOrder(_order);
       }
     } on DioException {
       // The payment landed; a failed refresh is cosmetic.
+    }
+  }
+
+  /// Downloads the bill or packing slip and hands it to the share sheet,
+  /// where the phone's print service, WhatsApp or a Bluetooth printer app
+  /// can take it.
+  bool _printing = false;
+  Future<void> _sharePdf({required bool packingSlip}) async {
+    if (_printing) return;
+    setState(() => _printing = true);
+    try {
+      final res = await _api.downloadMerchantOrderPdf(
+        _id,
+        packingSlip: packingSlip,
+      );
+      final bytes = res.data;
+      if (bytes == null || bytes.isEmpty) throw Exception('Empty file');
+      final dir = await getTemporaryDirectory();
+      final number = '${_order['orderNumber'] ?? _id}';
+      final file = File(
+        '${dir.path}/$number-${packingSlip ? 'packing-slip' : 'bill'}.pdf',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      final box = context.findRenderObject() as RenderBox?;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'application/pdf')],
+          subject: packingSlip ? 'Packing slip $number' : 'Bill $number',
+          sharePositionOrigin: box == null
+              ? null
+              : box.localToGlobal(Offset.zero) & box.size,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _toast(
+        e is DioException
+            ? _message(e)
+            : "Couldn't prepare the ${packingSlip ? 'packing slip' : 'bill'}.",
+        PharmacyColors.error,
+      );
+    } finally {
+      if (mounted) setState(() => _printing = false);
     }
   }
 
@@ -303,7 +463,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
@@ -333,7 +493,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             Text(
               _order['orderNumber']?.toString() ?? 'Order',
               style: PharmacyType.sans(
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: PharmacyColors.textStrong,
               ),
@@ -350,132 +510,372 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 14),
-            child: Center(child: PharmacyStatusPill.status(_status)),
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: PharmacyMotion.medium,
+                transitionBuilder: (child, a) => ScaleTransition(
+                  scale: Tween(begin: 0.8, end: 1.0).animate(a),
+                  child: FadeTransition(opacity: a, child: child),
+                ),
+                // Hidden until loaded: the default would read "placed" for
+                // an order that may already be packed.
+                child: _waiting
+                    ? const SizedBox.shrink()
+                    : PharmacyStatusPill.status(
+                        _status,
+                        key: ValueKey(_status),
+                      ),
+              ),
+            ),
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              // Pull to refresh re-reads the order, which matters when the
-              // customer cancels or pays while this screen is open.
-              child: RefreshIndicator(
-                color: PharmacyColors.green,
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-                  children: [
-                    _totalStrip(),
-                    const SizedBox(height: 22),
-                    _label('CUSTOMER'),
-                    _customerGroup(),
-                    const SizedBox(height: 22),
-                    _label('DELIVERY ADDRESS'),
-                    _addressGroup(),
-                    const SizedBox(height: 22),
-                    _label('PAYMENT'),
-                    _paymentGroup(),
-                    if ('${_order['paymentStatus']}' != 'paid' &&
-                        !['cancelled', 'returned'].contains(_status)) ...[
-                      const SizedBox(height: 10),
-                      PharmacyButton(
-                        label:
-                            'Collect ${_rupees(_num(_order['totalAmount']))} by UPI',
-                        icon: LucideIcons.qrCode,
-                        onPressed: _collect,
+      body: _waiting
+          ? _waitingBody()
+          : SafeArea(
+              child: Column(
+                children: [
+                  Expanded(
+                    // Pull to refresh re-reads the order, which matters when the
+                    // customer cancels or pays while this screen is open.
+                    child: RefreshIndicator(
+                      color: PharmacyColors.green,
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: _staggered([
+                          _totalStrip(),
+                          if (_stageIndex(_status) >= 0) ...[
+                            const SizedBox(height: 12),
+                            _progress(),
+                          ],
+                          const SizedBox(height: 22),
+                          _label('CUSTOMER'),
+                          _customerGroup(),
+                          const SizedBox(height: 22),
+                          _label('DELIVERY ADDRESS'),
+                          _addressGroup(),
+                          const SizedBox(height: 22),
+                          _label('PAYMENT'),
+                          _paymentGroup(),
+                          // Not before acceptance: collecting money for an order the
+                          // store may still reject only creates a refund.
+                          if ('${_order['paymentStatus']}' != 'paid' &&
+                              !_isNewOrder &&
+                              _rx != 'pending_review' &&
+                              ![
+                                'cancelled',
+                                'returned',
+                                'payment_pending',
+                              ].contains(_status)) ...[
+                            const SizedBox(height: 10),
+                            PharmacyButton(
+                              label:
+                                  'Collect ${_rupees(_num(_order['totalAmount']))} by UPI',
+                              icon: LucideIcons.qrCode,
+                              onPressed: _collect,
+                            ),
+                          ],
+                          if ('${_delivery['driverName'] ?? ''}'
+                              .isNotEmpty) ...[
+                            const SizedBox(height: 22),
+                            _label('DELIVERY'),
+                            _deliveryGroup(),
+                          ],
+                          if (_tracking['trackingNumber'] != null ||
+                              _tracking['carrier'] != null) ...[
+                            const SizedBox(height: 22),
+                            _label('SHIPMENT'),
+                            _shipmentGroup(),
+                          ],
+                          const SizedBox(height: 22),
+                          _label('ITEMS (${items.length})'),
+                          _itemsGroup(items),
+                          const SizedBox(height: 22),
+                          _label('BILL'),
+                          _billGroup(),
+                          // Once accepted there is something to pack; once stock is
+                          // allocated (fulfillmentSaleId) the bill is final.
+                          if (!_isNewOrder &&
+                              _rx != 'pending_review' &&
+                              ![
+                                'cancelled',
+                                'payment_pending',
+                              ].contains(_status)) ...[
+                            const SizedBox(height: 22),
+                            _label('PRINT'),
+                            _printGroup(),
+                          ],
+                          // Nothing is earned on an order that was
+                          // cancelled or sent back, so no breakdown for it.
+                          if (_settlement.isNotEmpty &&
+                              !['cancelled', 'returned'].contains(_status)) ...[
+                            const SizedBox(height: 22),
+                            _label('YOUR EARNING'),
+                            _settlementGroup(),
+                          ],
+                          if (_order['prescriptionRequired'] == true) ...[
+                            const SizedBox(height: 22),
+                            _label('PRESCRIPTION'),
+                            _prescriptionGroup(),
+                          ],
+                          if (_maps(_order['statusHistory']).isNotEmpty) ...[
+                            const SizedBox(height: 22),
+                            _label('TIMELINE'),
+                            _timelineGroup(),
+                          ],
+                        ]),
                       ),
-                    ],
-                    if (_tracking['trackingNumber'] != null ||
-                        _tracking['carrier'] != null) ...[
-                      const SizedBox(height: 22),
-                      _label('SHIPMENT'),
-                      _shipmentGroup(),
-                    ],
-                    const SizedBox(height: 22),
-                    _label('ITEMS (${items.length})'),
-                    _itemsGroup(items),
-                    const SizedBox(height: 22),
-                    _label('BILL'),
-                    _billGroup(),
-                    if (_settlement.isNotEmpty) ...[
-                      const SizedBox(height: 22),
-                      _label('YOUR EARNING'),
-                      _settlementGroup(),
-                    ],
-                    if (_order['prescriptionRequired'] == true) ...[
-                      const SizedBox(height: 22),
-                      _label('PRESCRIPTION'),
-                      _prescriptionGroup(),
-                    ],
-                    if (_maps(_order['statusHistory']).isNotEmpty) ...[
-                      const SizedBox(height: 22),
-                      _label('TIMELINE'),
-                      _timelineGroup(),
-                    ],
-                  ],
-                ),
+                    ),
+                  ),
+                  if (_rx == 'pending_review')
+                    _bottomBar(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: PharmacySecondaryButton(
+                              label: 'Reject',
+                              color: PharmacyColors.error,
+                              onPressed: _busy ? null : () => _reviewRx(false),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: PharmacyButton(
+                              label: 'Approve',
+                              onPressed: _busy ? null : () => _reviewRx(true),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_isNewOrder)
+                    _bottomBar(
+                      // A store has to be able to say no. Before this the only
+                      // options were accept, or "cancel" — which reads to the
+                      // customer as backing out of an order already agreed.
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: PharmacySecondaryButton(
+                              label: 'Reject',
+                              color: PharmacyColors.error,
+                              onPressed: _busy ? null : _rejectOrder,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: PharmacyButton(
+                              label: 'Accept order',
+                              icon: LucideIcons.circleCheckBig,
+                              loading: _busy,
+                              onPressed: _busy ? null : _confirmOrder,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_status == 'out_for_delivery')
+                    _bottomBar(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: PharmacySecondaryButton(
+                              label: 'Delivery failed',
+                              color: PharmacyColors.error,
+                              onPressed: _busy ? null : _deliveryFailed,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: PharmacyButton(
+                              label: 'Mark delivered',
+                              icon: LucideIcons.circleCheckBig,
+                              loading: _busy,
+                              onPressed: _busy
+                                  ? null
+                                  : () => _advance('delivered'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (next != null)
+                    _bottomBar(
+                      child: PharmacyButton(
+                        label:
+                            next == 'out_for_delivery' &&
+                                _status == 'ready_to_ship'
+                            ? 'Hand over to driver'
+                            : next == 'packing'
+                            ? 'Start packing'
+                            : next == 'ready_to_ship'
+                            ? 'Mark packed'
+                            : 'Move to ${orderStatusLabel(next)}',
+                        icon: next == 'out_for_delivery'
+                            ? LucideIcons.bike
+                            : LucideIcons.arrowRight,
+                        loading: _busy,
+                        onPressed: _busy ? null : () => _advance(next),
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (_rx == 'pending_review')
-              _bottomBar(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: PharmacySecondaryButton(
-                        label: 'Reject',
-                        color: PharmacyColors.error,
-                        onPressed: _busy ? null : () => _reviewRx(false),
+    );
+  }
+
+  /// Fades each top-level row in, one after another. Spacers are passed
+  /// through unwrapped so they do not use up stagger slots.
+  List<Widget> _staggered(List<Widget> children) {
+    var i = 0;
+    return [
+      for (final c in children)
+        c is SizedBox ? c : PharmacyEntrance(index: i++, child: c),
+    ];
+  }
+
+  static const _stages = [
+    ('confirmed', 'Accepted', LucideIcons.clipboardCheck),
+    ('packing', 'Packing', LucideIcons.package),
+    ('ready_to_ship', 'Packed', LucideIcons.packageCheck),
+    ('out_for_delivery', 'On the way', LucideIcons.bike),
+    ('delivered', 'Delivered', LucideIcons.circleCheckBig),
+  ];
+
+  /// Position on the fulfilment ladder; -1 for states that are not on it
+  /// (waiting for acceptance, cancelled, returned).
+  static int _stageIndex(String status) {
+    if (status == 'shipped') return 3;
+    return _stages.indexWhere((s) => s.$1 == status);
+  }
+
+  /// Five steps with a bar that fills to the current one. Rebuilt with the
+  /// order, so moving it forward animates the fill to the next step.
+  Widget _progress() {
+    final current = _stageIndex(_status);
+    final reduced = PharmacyMotion.reduced(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: PharmacyColors.panel,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          LayoutBuilder(
+            builder: (context, c) {
+              final fraction = current / (_stages.length - 1);
+              return Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Container(
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: PharmacyColors.bg,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(begin: reduced ? fraction : 0, end: fraction),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.easeOutCubic,
+                    builder: (_, f, _) => Container(
+                      height: 4,
+                      width: (c.maxWidth - 28) * f,
+                      margin: const EdgeInsets.only(left: 14),
+                      decoration: BoxDecoration(
+                        color: PharmacyColors.green,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: PharmacyButton(
-                        label: 'Approve',
-                        onPressed: _busy ? null : () => _reviewRx(true),
-                      ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      for (var i = 0; i < _stages.length; i++)
+                        _stageDot(i, current),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (var i = 0; i < _stages.length; i++)
+                Expanded(
+                  child: Text(
+                    _stages[i].$2,
+                    textAlign: i == 0
+                        ? TextAlign.left
+                        : i == _stages.length - 1
+                        ? TextAlign.right
+                        : TextAlign.center,
+                    style: PharmacyType.sans(
+                      fontSize: 10.5,
+                      fontWeight: i == current
+                          ? FontWeight.w800
+                          : FontWeight.w600,
+                      color: i <= current
+                          ? PharmacyColors.textStrong
+                          : PharmacyColors.textTertiary,
                     ),
-                  ],
+                  ),
                 ),
-              )
-            else if (_isNewOrder)
-              _bottomBar(
-                // A store has to be able to say no. Before this the only
-                // options were accept, or "cancel" — which reads to the
-                // customer as backing out of an order already agreed.
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: PharmacySecondaryButton(
-                        label: 'Reject',
-                        color: PharmacyColors.error,
-                        onPressed: _busy ? null : _rejectOrder,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 2,
-                      child: PharmacyButton(
-                        label: 'Accept order',
-                        icon: LucideIcons.circleCheckBig,
-                        loading: _busy,
-                        onPressed: _busy ? null : _confirmOrder,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else if (next != null)
-              _bottomBar(
-                child: PharmacyButton(
-                  label: 'Move to ${orderStatusLabel(next)}',
-                  icon: LucideIcons.arrowRight,
-                  loading: _busy,
-                  onPressed: _busy ? null : () => _advance(next),
-                ),
-              ),
-          ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stageDot(int i, int current) {
+    final done = i < current;
+    final active = i == current;
+    // The bounce lives on the scale only. On the decoration, `settle`
+    // overshoots past 1, and lerping the glow from active to done then asks
+    // for a negative blur radius — which crashed on "Delivered".
+    return AnimatedScale(
+      scale: active ? 1.08 : 1,
+      duration: PharmacyMotion.medium,
+      curve: PharmacyMotion.settle,
+      child: _stageDotBody(i, done, active),
+    );
+  }
+
+  Widget _stageDotBody(int i, bool done, bool active) {
+    return AnimatedContainer(
+      duration: PharmacyMotion.medium,
+      curve: PharmacyMotion.enter,
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: done || active ? PharmacyColors.green : PharmacyColors.bg,
+        border: Border.all(
+          color: done || active
+              ? PharmacyColors.green
+              : PharmacyColors.borderStrong,
+          width: 2,
         ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: PharmacyColors.green.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                ),
+              ]
+            : const [],
+      ),
+      child: Icon(
+        done ? LucideIcons.check : _stages[i].$3,
+        size: 13,
+        color: done || active ? Colors.white : PharmacyColors.textTertiary,
       ),
     );
   }
@@ -494,7 +894,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       decoration: BoxDecoration(
         color: PharmacyColors.greenVeryLight,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: PharmacyColors.greenLight),
       ),
       child: Row(
         children: [
@@ -503,11 +902,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'ORDER VALUE',
+                  'Order value',
                   style: PharmacyType.sans(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.4,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
                     color: PharmacyColors.greenDark,
                   ),
                 ),
@@ -515,7 +913,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 Text(
                   _rupees(total),
                   style: PharmacyType.number(
-                    fontSize: 26,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.8,
                     height: 1,
@@ -579,7 +977,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: Text(
                 display[0].toUpperCase(),
                 style: PharmacyType.sans(
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.greenDark,
                 ),
@@ -595,7 +993,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: PharmacyType.sans(
-                      fontSize: 14.5,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: PharmacyColors.textStrong,
                     ),
@@ -605,7 +1003,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     Text(
                       phone,
                       style: PharmacyType.number(
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         color: PharmacyColors.textSecondary,
                       ),
                     ),
@@ -664,7 +1062,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           child: Text(
             'No delivery address on this order',
             style: PharmacyType.sans(
-              fontSize: 12.5,
+              fontSize: 11.5,
               color: PharmacyColors.textTertiary,
             ),
           ),
@@ -705,7 +1103,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       child: Text(
                         label.toUpperCase(),
                         style: PharmacyType.sans(
-                          fontSize: 9,
+                          fontSize: 10.5,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.8,
                           color: PharmacyColors.textSecondary,
@@ -718,7 +1116,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     Text(
                       line,
                       style: PharmacyType.sans(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         height: 1.45,
                         color: PharmacyColors.textPrimary,
                       ),
@@ -735,7 +1133,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: PharmacyType.sans(
-                                fontSize: 13,
+                                fontSize: 12.5,
                                 fontWeight: FontWeight.w600,
                                 color: PharmacyColors.textPrimary,
                               ),
@@ -746,7 +1144,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           Text(
                             pincode,
                             style: PharmacyType.number(
-                              fontSize: 13,
+                              fontSize: 12.5,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.3,
                               color: PharmacyColors.textStrong,
@@ -818,10 +1216,79 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         method == 'cod' ? 'Cash on delivery' : 'Online payment',
       ),
       _hairline,
-      _dataRow('Status', status.replaceAll('_', ' '), valueColor: statusTone()),
+      _dataRow('Status', orderStatusLabel(status), valueColor: statusTone()),
       if (refund > 0) ...[
         _hairline,
         _dataRow('Refunded', _rupees(refund), valueColor: PharmacyColors.info),
+      ],
+    ]);
+  }
+
+  /// Who has the parcel. The call button is the whole point: when the
+  /// customer rings asking where it is, the store rings the driver.
+  Widget _deliveryGroup() {
+    final name = '${_delivery['driverName'] ?? ''}';
+    final phone = '${_delivery['driverPhone'] ?? ''}';
+    final vehicle = '${_delivery['vehicleNumber'] ?? ''}'.trim();
+    final at = _date(_delivery['handedOverAt']);
+    final attempts = _num(_delivery['attempts']).toInt();
+    final failure = '${_delivery['lastFailureReason'] ?? ''}'.trim();
+
+    return _group([
+      Padding(
+        padding: const EdgeInsets.fromLTRB(13, 11, 8, 11),
+        child: Row(
+          children: [
+            const Icon(
+              LucideIcons.bike,
+              size: 16,
+              color: PharmacyColors.greenDark,
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: PharmacyType.sans(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: PharmacyColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    [phone, if (vehicle.isNotEmpty) vehicle].join(' · '),
+                    style: PharmacyType.sans(
+                      fontSize: 10.5,
+                      color: PharmacyColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (phone.isNotEmpty)
+              IconButton(
+                tooltip: 'Call driver',
+                onPressed: () => _call(phone),
+                icon: const Icon(
+                  LucideIcons.phone,
+                  size: 18,
+                  color: PharmacyColors.greenDark,
+                ),
+              ),
+          ],
+        ),
+      ),
+      if (at != null) ...[_hairline, _dataRow('Handed over', at)],
+      if (attempts > 1) ...[_hairline, _dataRow('Attempt', '$attempts')],
+      if (failure.isNotEmpty && _status != 'delivered') ...[
+        _hairline,
+        _dataRow(
+          'Last attempt failed',
+          failure,
+          valueColor: PharmacyColors.warning,
+        ),
       ],
     ]);
   }
@@ -861,7 +1328,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           child: Text(
             'No line items on this order',
             style: PharmacyType.sans(
-              fontSize: 12.5,
+              fontSize: 11.5,
               color: PharmacyColors.textTertiary,
             ),
           ),
@@ -906,7 +1373,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              medicineCategoryIcon(unit.isEmpty ? null : unit),
+              // Category picks the icon; the unit ("strip", "bottle") is not
+              // a category and always fell through to the generic pill.
+              medicineCategoryIcon(
+                '${item['category'] ?? (item['medicineId'] is Map ? item['medicineId']['category'] : '') ?? ''}',
+              ),
               size: 16,
               color: PharmacyColors.greenDark,
             ),
@@ -924,7 +1395,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: PharmacyType.sans(
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           color: PharmacyColors.textPrimary,
                         ),
@@ -944,7 +1415,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         child: Text(
                           'Rx',
                           style: PharmacyType.sans(
-                            fontSize: 9,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.w800,
                             color: PharmacyColors.warning,
                           ),
@@ -959,7 +1430,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: PharmacyType.sans(
-                    fontSize: 11,
+                    fontSize: 11.5,
                     color: PharmacyColors.textTertiary,
                   ),
                 ),
@@ -982,7 +1453,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           Text(
             _rupees(_num(item['totalAmount'])),
             style: PharmacyType.number(
-              fontSize: 13,
+              fontSize: 12.5,
               fontWeight: FontWeight.w700,
               color: PharmacyColors.textStrong,
             ),
@@ -1039,7 +1510,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: Text(
                 'Total',
                 style: PharmacyType.sans(
-                  fontSize: 13.5,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.textStrong,
                 ),
@@ -1048,13 +1519,96 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             Text(
               _rupees(total),
               style: PharmacyType.number(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: PharmacyColors.textStrong,
               ),
             ),
           ],
         ),
+      ),
+    ]);
+  }
+
+  Widget _printGroup() {
+    final billReady = _order['fulfillmentSaleId'] != null;
+    Widget row(IconData icon, String title, String sub, VoidCallback? onTap) =>
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(13, 12, 11, 12),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: onTap == null
+                        ? PharmacyColors.textDisabled
+                        : PharmacyColors.greenDark,
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: PharmacyType.sans(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: onTap == null
+                                ? PharmacyColors.textTertiary
+                                : PharmacyColors.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          sub,
+                          style: PharmacyType.sans(
+                            fontSize: 10.5,
+                            color: PharmacyColors.textTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_printing)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: PharmacyColors.green,
+                      ),
+                    )
+                  else
+                    const Icon(
+                      LucideIcons.share2,
+                      size: 15,
+                      color: PharmacyColors.textDisabled,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+    return _group([
+      row(
+        LucideIcons.package,
+        'Packing slip',
+        'Items with tick boxes, address and amount to collect',
+        _printing ? null : () => _sharePdf(packingSlip: true),
+      ),
+      _hairline,
+      row(
+        LucideIcons.receiptText,
+        'Customer bill',
+        billReady
+            ? 'GST invoice to put in the bag'
+            : 'Available once stock is allocated',
+        !billReady || _printing ? null : () => _sharePdf(packingSlip: false),
       ),
     ]);
   }
@@ -1091,7 +1645,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: Text(
                 delivered ? 'Settled to you' : 'You will receive',
                 style: PharmacyType.sans(
-                  fontSize: 13.5,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.textStrong,
                 ),
@@ -1100,7 +1654,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             Text(
               _rupees(earning),
               style: PharmacyType.number(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: PharmacyColors.greenDark,
               ),
@@ -1116,8 +1670,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         'Commission is charged on medicines only. '
         '${tax > 0 ? 'GST of ${_rupees(tax)} ' : ''}'
         '${tax > 0 && delivery > 0 ? 'and ' : ''}'
-        '${delivery > 0 ? 'the ${_rupees(delivery)} delivery fee ' : ''}'
-        '${tax > 0 || delivery > 0 ? 'are excluded from it.' : 'Tax and delivery are excluded from it.'}'
+        '${delivery > 0 ? '${tax > 0 ? 'the' : 'The'} ${_rupees(delivery)} delivery fee ' : ''}'
+        '${tax > 0 && delivery > 0
+            ? 'are excluded from it.'
+            : tax > 0 || delivery > 0
+            ? 'is excluded from it.'
+            : 'Tax and delivery are excluded from it.'}'
         '${delivered ? '' : ' Settled once the order is delivered.'}',
         tone: true,
       ),
@@ -1166,7 +1724,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: Text(
                 'Prescription',
                 style: PharmacyType.sans(
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   color: PharmacyColors.textPrimary,
                 ),
@@ -1200,11 +1758,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       // Prescription Queue, because a pharmacist checking an order should
       // not have to go hunting for the prescription behind it.
       Material(
-        color: PharmacyColors.bg,
+        color: Colors.transparent,
         child: InkWell(
           onTap: () async {
             await Navigator.of(context).push(
-              MaterialPageRoute(
+              PharmacyPageRoute(
                 builder: (_) => PrescriptionDetailsScreen(order: _order),
               ),
             );
@@ -1226,7 +1784,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         ? 'View prescription details'
                         : 'View prescription & uploaded scan',
                     style: PharmacyType.sans(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: PharmacyColors.textPrimary,
                     ),
@@ -1331,7 +1889,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         child: Text(
                           orderStatusLabel(status),
                           style: PharmacyType.sans(
-                            fontSize: 12.5,
+                            fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                             color: first
                                 ? PharmacyColors.textStrong
@@ -1371,38 +1929,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   // ────────────────────────── Shared chrome ────────────────────────
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 
-  Widget _group(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
+  Widget _group(List<Widget> children) => PharmacyGroup(children: children);
 
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
+  static Widget get _hairline => const PharmacyHairline();
 
   Widget _circleAction(IconData icon, String tooltip, VoidCallback onTap) =>
       Tooltip(
         message: tooltip,
         child: Material(
-          color: PharmacyColors.greenVeryLight,
+          color: PharmacyColors.bg,
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -1482,20 +2019,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: PharmacyType.sans(
-                fontSize: 12.5,
+                fontSize: 11.5,
                 color: PharmacyColors.textSecondary,
               ),
             ),
           ),
           const SizedBox(width: 10),
-          Flexible(
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 190),
             child: Text(
               value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: PharmacyType.number(
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontWeight: FontWeight.w700,
                 color: valueColor ?? PharmacyColors.textStrong,
               ),
@@ -1508,14 +2046,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ],
       ),
     );
-    if (onTap == null) return Container(color: PharmacyColors.bg, child: row);
+    if (onTap == null) return row;
     return Material(
-      color: PharmacyColors.bg,
+      color: Colors.transparent,
       child: InkWell(onTap: onTap, child: row),
     );
   }
 
-  Widget _bottomBar({required Widget child}) => Container(
+  Widget _bottomBar({required Widget child}) => PharmacyEntrance(
+    delay: const Duration(milliseconds: 200),
+    offsetY: 40,
+    child: _bottomBarBody(child),
+  );
+
+  Widget _bottomBarBody(Widget child) => Container(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
     decoration: const BoxDecoration(
       color: PharmacyColors.bg,

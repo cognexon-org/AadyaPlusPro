@@ -9,10 +9,11 @@ import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
 import 'pharmacy_edit_profile.dart';
-import 'pharmacy_inventory_ops.dart';
 import 'pharmacy_online_settings.dart';
 import 'pharmacy_procurement.dart';
+import '../providers/pharmacy_profile_provider.dart';
 import 'prescription_queue.dart';
+import 'schedule_register_screen.dart';
 
 class PharmacyProfile extends ConsumerWidget {
   const PharmacyProfile({super.key});
@@ -21,7 +22,15 @@ class PharmacyProfile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authProvider).user;
     final storeState = ref.watch(pharmacyStoreProvider);
+    final profileState = ref.watch(pharmacyProfileProvider);
     final store = storeState.selectedStore ?? const <String, dynamic>{};
+    final profile = profileState.profile;
+
+    if (profileState.loadedStoreId == null && !profileState.isProfileLoading) {
+      Future.microtask(
+        () => ref.read(pharmacyProfileProvider.notifier).initialize(),
+      );
+    }
 
     return Scaffold(
       backgroundColor: PharmacyColors.bg,
@@ -34,45 +43,58 @@ class PharmacyProfile extends ConsumerWidget {
               subtitle: 'Branch profile & management tools',
             ),
             const SizedBox(height: 18),
-            _identityCard(context, store, storeState, user),
+            PharmacyEntrance(
+              child: _identityCard(context, store, profile, storeState, user),
+            ),
             const SizedBox(height: 22),
             _label('MANAGEMENT'),
-            _group([
-              _tile(
-                context,
-                LucideIcons.truck,
-                'Procurement & GRN',
-                'Suppliers, purchase orders and receiving',
-                const PharmacyProcurement(),
-              ),
-              _hairline,
-              // Inter-store transfers only mean something to a pharmacy
-              // running more than one branch, and every account on the
-              // platform is currently single-branch. Screen kept, tile off.
-              // _tile(
-              //   context,
-              //   LucideIcons.repeat2,
-              //   'Transfers & Returns',
-              //   'Inter-store transfers and sales returns',
-              //   const PharmacyInventoryOps(),
-              // ),
-              // _hairline,
-              _tile(
-                context,
-                LucideIcons.fileStack,
-                'Prescription Queue',
-                'Review prescription-required online orders',
-                const PrescriptionQueue(),
-              ),
-              _hairline,
-              _tile(
-                context,
-                LucideIcons.globe,
-                'Online Store',
-                'Serviceability, delivery settings and coupons',
-                const PharmacyOnlineSettings(),
-              ),
-            ]),
+            PharmacyEntrance(
+              index: 2,
+              child: _group([
+                _tile(
+                  context,
+                  LucideIcons.truck,
+                  'Procurement & GRN',
+                  'Suppliers, purchase orders and receiving',
+                  const PharmacyProcurement(),
+                ),
+                _hairline,
+                // Inter-store transfers only mean something to a pharmacy
+                // running more than one branch, and every account on the
+                // platform is currently single-branch. Screen kept, tile off.
+                // _tile(
+                //   context,
+                //   LucideIcons.repeat2,
+                //   'Transfers & Returns',
+                //   'Inter-store transfers and sales returns',
+                //   const PharmacyInventoryOps(),
+                // ),
+                // _hairline,
+                _tile(
+                  context,
+                  LucideIcons.fileStack,
+                  'Prescription queue',
+                  'Review prescription-required online orders',
+                  const PrescriptionQueue(),
+                ),
+                _hairline,
+                _tile(
+                  context,
+                  LucideIcons.bookLock,
+                  'Schedule H register',
+                  'Scheduled drugs dispensed, for inspection',
+                  const ScheduleRegisterScreen(),
+                ),
+                _hairline,
+                _tile(
+                  context,
+                  LucideIcons.globe,
+                  'Online store',
+                  'Serviceability, delivery settings and coupons',
+                  const PharmacyOnlineSettings(),
+                ),
+              ]),
+            ),
             if (storeState.stores.length > 1) ...[
               const SizedBox(height: 22),
               _label('BRANCH'),
@@ -84,11 +106,24 @@ class PharmacyProfile extends ConsumerWidget {
               ]),
             ],
             const SizedBox(height: 26),
-            PharmacySecondaryButton(
-              label: 'Logout',
-              icon: LucideIcons.logOut,
-              color: PharmacyColors.error,
-              onPressed: () => ref.read(authProvider.notifier).logout(),
+            PharmacyEntrance(
+              index: 4,
+              child: PharmacySecondaryButton(
+                label: 'Logout',
+                icon: LucideIcons.logOut,
+                color: PharmacyColors.error,
+                onPressed: () async {
+                  final ok = await PharmacyDialog.confirm(
+                    context,
+                    title: 'Log out?',
+                    message:
+                        'You will stop receiving new-order alerts on this phone until you log in again.',
+                    icon: LucideIcons.logOut,
+                    confirmLabel: 'Log out',
+                  );
+                  if (ok) ref.read(authProvider.notifier).logout();
+                },
+              ),
             ),
           ],
         ),
@@ -111,11 +146,12 @@ class PharmacyProfile extends ConsumerWidget {
   Widget _identityCard(
     BuildContext context,
     Map<String, dynamic> store,
+    Map<String, dynamic> profile,
     PharmacyStoreState storeState,
     UserModel? user,
   ) {
     final address = Map<String, dynamic>.from(
-      (store['address'] as Map?) ?? const {},
+      (profile['address'] as Map?) ?? (store['address'] as Map?) ?? const {},
     );
     final addressText = [
       address['street'],
@@ -124,276 +160,196 @@ class PharmacyProfile extends ConsumerWidget {
       address['pincode'],
     ].where((v) => v != null && '$v'.trim().isNotEmpty).join(', ');
 
+    final name =
+        '${profile['pharmacyName'] ?? store['name'] ?? user?.name ?? 'Pharmacy'}';
     final code = '${store['code'] ?? ''}'.trim();
     final licence =
-        '${store['drugLicenseNumber'] ?? store['licenseNumber'] ?? ''}'.trim();
-    final gstin = '${store['gstin'] ?? ''}'.trim();
-    final phone = '${store['phone'] ?? user?.phone ?? ''}'.trim();
-    final email = '${store['email'] ?? user?.email ?? ''}'.trim();
+        '${profile['licenseNumber'] ?? store['drugLicenseNumber'] ?? store['licenseNumber'] ?? ''}'
+            .trim();
+    final gstin = '${profile['gstin'] ?? store['gstin'] ?? ''}'.trim();
+    final phone = '${profile['phone'] ?? store['phone'] ?? user?.phone ?? ''}'
+        .trim();
+    final email = '${profile['email'] ?? store['email'] ?? user?.email ?? ''}'
+        .trim();
+    final rawStatus = profile['verificationStatus']?.toString().toLowerCase();
+    final verificationStatus = rawStatus == 'approved'
+        ? VerificationStatus.approved
+        : rawStatus == 'rejected'
+        ? VerificationStatus.rejected
+        : rawStatus == 'suspended'
+        ? VerificationStatus.suspended
+        : user?.verificationStatus;
 
-    // Not `_group`: that idiom is a white panel with slate hairlines, and this
-    // card is the brand-green one. It keeps the same radius and row rhythm so
-    // it still reads as part of the same set.
-    return Container(
-      decoration: BoxDecoration(
-        color: PharmacyColors.green,
-        borderRadius: BorderRadius.circular(13),
+    final (statusText, statusTone, statusIcon) = switch (verificationStatus) {
+      VerificationStatus.approved => (
+        'Verified pharmacy',
+        PharmacyColors.greenDark,
+        LucideIcons.badgeCheck,
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: Column(
+      VerificationStatus.rejected => (
+        'Verification rejected',
+        PharmacyColors.error,
+        LucideIcons.circleAlert,
+      ),
+      VerificationStatus.suspended => (
+        'Suspended',
+        PharmacyColors.error,
+        LucideIcons.circleAlert,
+      ),
+      VerificationStatus.pending => (
+        'Verification pending',
+        PharmacyColors.warning,
+        LucideIcons.hourglass,
+      ),
+      null => ('', PharmacyColors.textSecondary, LucideIcons.circle),
+    };
+
+    // Minimal: a plain header — no green slab — then the reference numbers
+    // as a grouped list a pharmacist can read off and type elsewhere.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 13),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: const BoxDecoration(
+                color: PharmacyColors.panel,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                LucideIcons.store,
+                size: 24,
+                color: PharmacyColors.textHeading,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 46,
-                        height: 46,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(13),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.32),
+                  Text(
+                    name,
+                    style: PharmacyType.sans(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      color: PharmacyColors.textStrong,
+                    ),
+                  ),
+                  if (addressText.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      addressText,
+                      style: PharmacyType.sans(
+                        fontSize: 11.5,
+                        height: 1.4,
+                        color: PharmacyColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (statusText.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(statusIcon, size: 14, color: statusTone),
+                        const SizedBox(width: 5),
+                        Text(
+                          statusText,
+                          style: PharmacyType.sans(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: statusTone,
                           ),
                         ),
-                        child: const Icon(
-                          LucideIcons.store,
-                          size: 21,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 13),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${store['name'] ?? user?.name ?? 'Pharmacy'}',
-                              style: PharmacyType.sans(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.w700,
-                                height: 1.2,
-                                color: Colors.white,
-                              ),
+                        if (storeState.stores.length > 1 && code.isNotEmpty)
+                          Text(
+                            '  ·  $code',
+                            style: PharmacyType.sans(
+                              fontSize: 11.5,
+                              color: PharmacyColors.textSecondary,
                             ),
-                            if (addressText.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 2),
-                                    child: Icon(
-                                      LucideIcons.mapPin,
-                                      size: 12,
-                                      color: Color(0xCCFFFFFF),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: Text(
-                                      addressText,
-                                      style: PharmacyType.sans(
-                                        fontSize: 12,
-                                        height: 1.4,
-                                        color: Colors.white.withValues(
-                                          alpha: 0.85,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      _editButton(context),
-                    ],
-                  ),
-                  const SizedBox(height: 11),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      _verificationPill(user?.verificationStatus),
-                      // The branch code ("MAIN") only tells branches apart, so it
-                      // is clutter until there is more than one.
-                      if (storeState.stores.length > 1 && code.isNotEmpty)
-                        _pill(
-                          code,
-                          Colors.white,
-                          Colors.white.withValues(alpha: 0.18),
-                          Colors.white.withValues(alpha: 0.3),
-                        ),
-                    ],
-                  ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
-            _onGreenHairline,
+            _editButton(context),
+          ],
+        ),
+        const SizedBox(height: 20),
+        PharmacyGroup(
+          children: [
             _dataRow(LucideIcons.fileText, 'Drug licence', licence),
-            _onGreenHairline,
+            const PharmacyHairline(),
             _dataRow(LucideIcons.receipt, 'GSTIN', gstin),
             if (phone.isNotEmpty) ...[
-              _onGreenHairline,
+              const PharmacyHairline(),
               _dataRow(LucideIcons.phone, 'Phone', phone),
             ],
             if (email.isNotEmpty) ...[
-              _onGreenHairline,
-              _dataRow(LucideIcons.building2, 'Email', email),
+              const PharmacyHairline(),
+              _dataRow(LucideIcons.mail, 'Email', email),
             ],
           ],
         ),
-      ),
+      ],
     );
   }
 
-  /// Divider for the green card — a white wash, since a slate hairline
-  /// disappears against the fill.
-  static Widget get _onGreenHairline =>
-      Container(height: 1, color: Colors.white.withValues(alpha: 0.16));
-
-  Widget _editButton(BuildContext context) => Material(
-    color: Colors.white.withValues(alpha: 0.18),
-    borderRadius: BorderRadius.circular(9),
-    child: InkWell(
-      borderRadius: BorderRadius.circular(9),
-      onTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => const PharmacyEditProfile())),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(LucideIcons.pencil, size: 12, color: Colors.white),
-            const SizedBox(width: 5),
-            Text(
-              'Edit',
-              style: PharmacyType.sans(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ],
+  Widget _editButton(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: () => Navigator.of(
+      context,
+    ).push(PharmacyPageRoute(builder: (_) => const PharmacyEditProfile())),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 0, 4),
+      child: Text(
+        'Edit',
+        style: PharmacyType.sans(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: PharmacyColors.greenDark,
         ),
       ),
     ),
   );
 
-  Widget _verificationPill(VerificationStatus? status) {
-    switch (status) {
-      case VerificationStatus.approved:
-        return _pill(
-          'Verified',
-          PharmacyColors.greenDark,
-          Colors.white,
-          Colors.white,
-          icon: LucideIcons.badgeCheck,
-        );
-      case VerificationStatus.rejected:
-        return _pill(
-          'Verification rejected',
-          PharmacyColors.error,
-          PharmacyColors.errorBg,
-          PharmacyColors.errorBg,
-          icon: LucideIcons.circleAlert,
-        );
-      case VerificationStatus.suspended:
-        return _pill(
-          'Suspended',
-          PharmacyColors.error,
-          PharmacyColors.errorBg,
-          PharmacyColors.errorBg,
-          icon: LucideIcons.circleAlert,
-        );
-      case VerificationStatus.pending:
-        return _pill(
-          'Verification pending',
-          PharmacyColors.warning,
-          PharmacyColors.warningBg,
-          PharmacyColors.warningBg,
-          icon: LucideIcons.hourglass,
-        );
-      case null:
-        // Status not loaded yet — better to show nothing than to assert a
-        // state we have not actually read.
-        return const SizedBox.shrink();
-    }
-  }
-
-  Widget _pill(
-    String text,
-    Color fg,
-    Color bg,
-    Color border, {
-    IconData? icon,
-  }) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(7),
-      border: Border.all(color: border),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 12, color: fg),
-          const SizedBox(width: 5),
-        ],
-        Text(
-          text,
-          style: PharmacyType.sans(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-            color: fg,
-          ),
-        ),
-      ],
-    ),
-  );
-
+  /// A missing licence or GSTIN says "Not set" in amber rather than hiding
+  /// the row — a pharmacy without a drug licence on file is a thing to fix.
   Widget _dataRow(IconData icon, String label, String value) {
     final missing = value.isEmpty;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.7)),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              label,
-              style: PharmacyType.sans(
-                fontSize: 12.5,
-                color: Colors.white.withValues(alpha: 0.78),
-              ),
+          Icon(icon, size: 18, color: PharmacyColors.textHeading),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: PharmacyType.sans(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: PharmacyColors.textPrimary,
             ),
           ),
-          const SizedBox(width: 10),
-          Flexible(
+          const SizedBox(width: 12),
+          Expanded(
             child: Text(
               missing ? 'Not set' : value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: PharmacyType.number(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                // Amber-200, not the slate-page amber: the darker one is
-                // invisible against the green fill.
-                color: missing ? const Color(0xFFFDE68A) : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: missing
+                    ? PharmacyColors.warning
+                    : PharmacyColors.textSecondary,
               ),
             ),
           ),
@@ -404,32 +360,11 @@ class PharmacyProfile extends ConsumerWidget {
 
   // ────────────────────────── Section chrome ───────────────────────
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 
-  Widget _group(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
+  Widget _group(List<Widget> children) => PharmacyGroup(children: children);
 
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
+  static Widget get _hairline => const PharmacyHairline();
 
   Widget _tile(
     BuildContext context,
@@ -437,16 +372,25 @@ class PharmacyProfile extends ConsumerWidget {
     String title,
     String subtitle,
     Widget page,
-  ) => Material(
-    color: PharmacyColors.bg,
-    child: InkWell(
-      onTap: () =>
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)),
+  ) => PharmacyPressable(
+    scale: 0.985,
+    onTap: () =>
+        Navigator.of(context).push(PharmacyPageRoute(builder: (_) => page)),
+    child: Container(
+      color: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 11, 12),
         child: Row(
           children: [
-            Icon(icon, size: 17, color: PharmacyColors.greenDark),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: PharmacyColors.bg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 17, color: PharmacyColors.textHeading),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -456,7 +400,7 @@ class PharmacyProfile extends ConsumerWidget {
                     title,
                     style: PharmacyType.sans(
                       fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontSize: 12.5,
                       color: PharmacyColors.textPrimary,
                     ),
                   ),
@@ -464,7 +408,7 @@ class PharmacyProfile extends ConsumerWidget {
                   Text(
                     subtitle,
                     style: PharmacyType.sans(
-                      fontSize: 11,
+                      fontSize: 11.5,
                       color: PharmacyColors.textTertiary,
                     ),
                   ),

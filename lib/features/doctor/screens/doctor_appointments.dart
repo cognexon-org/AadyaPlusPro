@@ -1,499 +1,427 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/network/api_service.dart';
-import '../../../shared/widgets/empty_state.dart';
-import '../../../shared/widgets/app_dialog.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
-import 'doctor_prescriptions.dart';
-import '../../../shared/screens/professional_consultation_screen.dart';
+
 import '../../../shared/screens/app_chat_screen.dart';
+import '../../../shared/screens/professional_consultation_screen.dart';
+import '../../../shared/ui/app_ui.dart';
+import '../providers/doctor_appointments_provider.dart';
+import '../providers/doctor_prescriptions_provider.dart';
+import '../providers/doctor_profile_provider.dart';
+import '../widgets/doctor_ui.dart';
+import 'doctor_prescriptions.dart';
 import 'prescription_details.dart';
 
+/// The Appointments tab: requests to answer, what's coming, what's done.
+/// The appointments tab, shared by doctors and physiotherapists (the
+/// server scopes appointments by role). Defaults are the doctor's.
 class DoctorAppointments extends ConsumerStatefulWidget {
-  const DoctorAppointments({super.key});
+  final String title;
+
+  /// "appointment" or "session".
+  final String noun;
+
+  /// The screen an appointment opens.
+  final Widget Function(Map<String, dynamic> appointment)? detailsBuilder;
+
+  const DoctorAppointments({
+    super.key,
+    this.title = 'Appointments',
+    this.noun = 'appointment',
+    this.detailsBuilder,
+  });
 
   @override
   ConsumerState<DoctorAppointments> createState() => _DoctorAppointmentsState();
 }
 
+enum _Tab { requests, upcoming, past }
+
 class _DoctorAppointmentsState extends ConsumerState<DoctorAppointments> {
-  final ApiService _api = ApiService();
-  bool _loading = true;
-  List<Map<String, dynamic>> _allAppointments = [];
-  String _statusFilter = 'all';
-  String _typeFilter = 'all';
+  _Tab _tab = _Tab.upcoming;
+  String? _type; // null = all
+  final Set<String> _busy = {};
+  bool _pickedInitialTab = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadAppointments();
-  }
+  Future<void> _refresh() =>
+      ref.read(doctorAppointmentsProvider.notifier).load(silent: true);
 
-  Future<void> _loadAppointments() async {
-    setState(() => _loading = true);
+  Future<void> _accept(Map<String, dynamic> a) async {
+    final id = '${a['_id']}';
+    setState(() => _busy.add(id));
     try {
-      final res = await _api.getDoctorAppointments(
-        queryParams: {'limit': 1000},
-      );
-      final data = res.data;
-      final list = data is Map
-          ? (data['data'] ?? data['appointments'] ?? [])
-          : data;
-      if (list is List) {
-        // Sort descending by date
-        final parsedList = list
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-        parsedList.sort((a, b) {
-          final da =
-              DateTime.tryParse(a['createdAt']?.toString() ?? '') ??
-              DateTime.now();
-          final db =
-              DateTime.tryParse(b['createdAt']?.toString() ?? '') ??
-              DateTime.now();
-          return db.compareTo(da);
-        });
-        _allAppointments = parsedList;
-      }
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+      await ref.read(doctorAppointmentsProvider.notifier).accept(id);
+      _toast('Accepted — ${patientName(a)} is on your schedule');
+    } catch (e) {
+      _toast(doctorError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
   }
 
-  Future<void> _refresh() async {
-    await _loadAppointments();
-    ref
-        .read(doctorDashboardProvider.notifier)
-        .loadDashboard(); // Refresh home stats too
+  Future<void> _decline(Map<String, dynamic> a) async {
+    final ok = await AppModal.confirm(
+      context,
+      title: 'Decline this request?',
+      message:
+          '${patientName(a)} is told you can’t take the appointment on ${dayLabel(apptStart(a))} at ${timeLabel(apptStart(a))}.',
+      confirmLabel: 'Decline',
+      cancelLabel: 'Keep',
+    );
+    if (!ok || !mounted) return;
+    final id = '${a['_id']}';
+    setState(() => _busy.add(id));
+    try {
+      await ref.read(doctorAppointmentsProvider.notifier).decline(id);
+      _toast('Request declined');
+    } catch (e) {
+      _toast(doctorError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
   }
 
-  List<Map<String, dynamic>> get _filtered {
-    return _allAppointments.where((a) {
-      if (_statusFilter != 'all') {
-        final status = (a['status'] ?? 'pending').toString().toLowerCase();
-        if (status != _statusFilter.toLowerCase()) return false;
-      }
-      if (_typeFilter != 'all' && a['type'] != _typeFilter) return false;
-      return true;
-    }).toList();
-  }
+  void _open(Map<String, dynamic> a) => Navigator.of(context).push(
+    AppPageRoute(
+      builder: (_) =>
+          widget.detailsBuilder?.call(a) ??
+          AppointmentDetailsScreen(appointment: a),
+    ),
+  );
 
-  void _openDetails(Map<String, dynamic> apt) async {
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AppointmentDetailsScreen(appointment: apt),
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: AppType.sans(fontSize: AppType.caption, color: Colors.white),
+        ),
+        backgroundColor: error ? AppColors.error : AppColors.textStrong,
+        behavior: SnackBarBehavior.floating,
       ),
     );
-    if (result == true) {
-      _refresh(); // Refresh if status changed in details
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
+    final state = ref.watch(doctorAppointmentsProvider);
+    // Open on Requests the first time there's something to answer.
+    if (!_pickedInitialTab && state.hasLoaded) {
+      _pickedInitialTab = true;
+      if (state.requests.isNotEmpty) _tab = _Tab.requests;
+    }
+
+    final source = switch (_tab) {
+      _Tab.requests => state.requests,
+      _Tab.upcoming => [...state.today.where(_notDone), ...state.upcoming],
+      _Tab.past => state.past,
+    };
+    final list = _type == null
+        ? source
+        : source.where((a) => apptType(a) == _type).toList();
 
     return Scaffold(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: AppScreenHeader(
+                title: widget.title,
+                subtitle: state.requests.isEmpty
+                    ? 'Your schedule and history'
+                    : '${state.requests.length} waiting for your answer',
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _Segmented(
+                value: _tab,
+                requests: state.requests.length,
+                onChanged: (t) => setState(() => _tab = t),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
                 children: [
-                  Text(
-                    'Appointments',
-                    style: GoogleFonts.manrope(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
+                  for (final t in const [null, 'clinic', 'video', 'home'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 7),
+                      child: AppFilterChip(
+                        label: t == null ? 'All types' : apptTypeInfo(t).label,
+                        selected: _type == t,
+                        onTap: () => setState(() => _type = t),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Manage your consultations and schedules',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Status Filters
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _buildFilterChips(
-                [
-                  'all',
-                  'pending',
-                  'confirmed',
-                  'in_progress',
-                  'completed',
-                  'cancelled',
-                ],
-                _statusFilter,
-                (v) => setState(() => _statusFilter = v),
+            SizedBox(
+              height: 2,
+              child: AnimatedOpacity(
+                opacity: state.isRefreshing ? 1 : 0,
+                duration: AppMotion.fast,
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  color: ModuleAccent.of(context).color,
+                  backgroundColor: Colors.transparent,
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            // Type Filters
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _buildFilterChips(
-                ['all', 'clinic', 'video', 'home'],
-                _typeFilter,
-                (v) => setState(() => _typeFilter = v),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Appointments list
-            Expanded(
-              child: _loading && _allAppointments.isEmpty
-                  ? const Center(
-                      child: CircularProgressIndicator(color: AppTheme.primary),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _refresh,
-                      child: filtered.isEmpty
-                          ? ListView(
-                              children: const [
-                                SizedBox(height: 80),
-                                EmptyState(
-                                  icon: CupertinoIcons.calendar,
-                                  title: 'No appointments found',
-                                  subtitle:
-                                      'Try changing your filters or pull to refresh',
-                                ),
-                              ],
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                              ),
-                              itemCount: filtered.length,
-                              itemBuilder: (context, i) =>
-                                  _buildAppointmentCard(filtered[i]),
-                            ),
-                    ),
-            ),
+            Expanded(child: _body(state, list)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildFilterChips(
-    List<String> options,
-    String selected,
-    ValueChanged<String> onChanged,
-  ) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: options.map((opt) {
-          final isSelected = selected == opt;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () => onChanged(opt),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primary : Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.primary : AppTheme.divider,
-                  ),
-                ),
-                child: Text(
-                  opt == 'all'
-                      ? 'All'
-                      : opt[0].toUpperCase() + opt.substring(1),
-                  style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: isSelected ? Colors.white : AppTheme.textSecondary,
-                  ),
+  static bool _notDone(Map<String, dynamic> a) =>
+      const {'confirmed', 'in_progress', 'rescheduled'}.contains(apptStatus(a));
+
+  Widget _body(DoctorAppointmentsState state, List<Map<String, dynamic>> list) {
+    if (state.isLoading && !state.hasLoaded) {
+      return ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [AppListSkeleton(count: 5)],
+      );
+    }
+    if (state.error != null && !state.hasLoaded) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: AppErrorBanner(message: state.error!, onRetry: _refresh),
+      );
+    }
+
+    final rows = <Widget>[];
+    if (list.isEmpty) {
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: AppEmptyState(
+            icon: switch (_tab) {
+              _Tab.requests => LucideIcons.inbox,
+              _Tab.upcoming => LucideIcons.calendarCheck,
+              _Tab.past => LucideIcons.history,
+            },
+            text: switch (_tab) {
+              _Tab.requests => 'No requests waiting. New bookings appear here.',
+              _Tab.upcoming =>
+                'Nothing scheduled. Accepted ${widget.noun}s appear here.',
+              _Tab.past => 'No past ${widget.noun}s in the last 60 days.',
+            },
+          ),
+        ),
+      );
+    } else {
+      String? lastDay;
+      for (final (i, a) in list.indexed) {
+        final day = dayLabel(apptStart(a));
+        if (_tab != _Tab.requests && day != lastDay) {
+          rows.add(
+            Padding(
+              padding: EdgeInsets.fromLTRB(2, i == 0 ? 4 : 16, 0, 8),
+              child: Text(
+                day,
+                style: AppType.sans(
+                  fontSize: AppType.small,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textTertiary,
                 ),
               ),
             ),
           );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildAppointmentCard(Map<String, dynamic> apt) {
-    final patient = apt['patientId'];
-    final patientName = patient is Map
-        ? (patient['name'] ?? 'Patient')
-        : 'Patient';
-    final status = (apt['status'] ?? 'pending').toString();
-    final type = (apt['type'] ?? 'clinic').toString();
-    final reason = apt['reason']?.toString().isEmpty ?? true
-        ? 'Consultation'
-        : apt['reason'];
-    final fee = apt['consultationFee'] ?? apt['totalAmount'] ?? 0;
-    final date = apt['appointmentDate'] ?? '';
-    final time = apt['startTime'] ?? '';
-    final id = apt['_id'] ?? '';
-
-    final statusColor = status == 'confirmed' || status == 'accepted'
-        ? AppTheme.primary
-        : status == 'pending'
-        ? AppTheme.warning
-        : status == 'cancelled'
-        ? AppTheme.error
-        : AppTheme.success;
-    final typeIcon = type == 'video'
-        ? CupertinoIcons.video_camera
-        : type == 'home'
-        ? CupertinoIcons.house
-        : Icons.local_hospital_outlined;
-
-    return GestureDetector(
-      onTap: () => _openDetails(apt),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.doctorGradient,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: Text(
-                      patientName[0],
-                      style: GoogleFonts.manrope(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        patientName,
-                        style: GoogleFonts.manrope(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        reason,
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    status.toUpperCase(),
-                    style: GoogleFonts.manrope(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: statusColor,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(
-                  CupertinoIcons.calendar,
-                  size: 14,
-                  color: AppTheme.textTertiary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _formatDate(date),
-                  style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                const Icon(
-                  CupertinoIcons.clock,
-                  size: 14,
-                  color: AppTheme.textTertiary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  time,
-                  style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Icon(typeIcon, size: 14, color: AppTheme.textTertiary),
-                const SizedBox(width: 6),
-                Text(
-                  type,
-                  style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '₹$fee',
-                  style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ],
-            ),
-            if (status == 'pending') ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _updateStatus(id, 'rejected'),
-                      icon: const Icon(CupertinoIcons.xmark_circle, size: 16),
-                      label: Text(
-                        'Reject',
-                        style: GoogleFonts.manrope(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.error,
-                        side: const BorderSide(color: AppTheme.error),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _updateStatus(id, 'accepted'),
-                      icon: const Icon(
-                        CupertinoIcons.checkmark_circle,
-                        size: 16,
-                      ),
-                      label: Text(
-                        'Accept',
-                        style: GoogleFonts.manrope(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        elevation: 0,
-                      ),
-                    ),
-                  ),
-                ],
+          lastDay = day;
+        }
+        final id = '${a['_id']}';
+        rows.add(
+          AppEntrance(
+            key: ValueKey('appt-$id'),
+            index: i,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: DoctorAppointmentCard(
+                appointment: a,
+                showDay: _tab == _Tab.requests,
+                onTap: () => _open(a),
+                actions: _tab == _Tab.requests
+                    ? Row(
+                        children: [
+                          Expanded(
+                            child: AppSecondaryButton(
+                              label: 'Decline',
+                              color: AppColors.error,
+                              onPressed: _busy.contains(id)
+                                  ? null
+                                  : () => _decline(a),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: AppButton(
+                              label: 'Accept',
+                              icon: LucideIcons.check,
+                              compact: true,
+                              loading: _busy.contains(id),
+                              onPressed: _busy.contains(id)
+                                  ? null
+                                  : () => _accept(a),
+                            ),
+                          ),
+                        ],
+                      )
+                    : null,
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return RefreshIndicator(
+      color: ModuleAccent.of(context).color,
+      onRefresh: _refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: rows,
       ),
     );
-  }
-
-  Future<void> _updateStatus(String appointmentId, String status) async {
-    if (appointmentId.isEmpty) return;
-    final success = await ref
-        .read(appointmentActionsProvider.notifier)
-        .updateStatus(appointmentId, status);
-    if (success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Appointment $status'),
-          backgroundColor: (status == 'confirmed' || status == 'accepted')
-              ? AppTheme.success
-              : AppTheme.error,
-        ),
-      );
-      _refresh();
-    }
-  }
-
-  String _formatDate(dynamic date) {
-    if (date is String && date.isNotEmpty) {
-      try {
-        final dt = DateTime.parse(date);
-        final now = DateTime.now();
-        if (dt.year == now.year && dt.month == now.month && dt.day == now.day)
-          return 'Today';
-        if (dt.year == now.year &&
-            dt.month == now.month &&
-            dt.day == now.day + 1)
-          return 'Tomorrow';
-        return '${dt.day}/${dt.month}';
-      } catch (_) {}
-    }
-    return date?.toString() ?? '';
   }
 }
 
-// ==================== APPOINTMENT DETAILS SCREEN ====================
+class _Segmented extends StatelessWidget {
+  final _Tab value;
+  final int requests;
+  final ValueChanged<_Tab> onChanged;
+  const _Segmented({
+    required this.value,
+    required this.requests,
+    required this.onChanged,
+  });
 
+  @override
+  Widget build(BuildContext context) {
+    const tabs = _Tab.values;
+    final i = tabs.indexOf(value);
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: AppMotion.medium,
+            curve: AppMotion.enter,
+            alignment: Alignment(-1 + i * 1.0, 0),
+            child: FractionallySizedBox(
+              widthFactor: 1 / tabs.length,
+              heightFactor: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.bg,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x14000000), blurRadius: 4),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (final t in tabs)
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => onChanged(t),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            switch (t) {
+                              _Tab.requests => 'Requests',
+                              _Tab.upcoming => 'Upcoming',
+                              _Tab.past => 'Past',
+                            },
+                            style: AppType.sans(
+                              fontSize: AppType.small,
+                              fontWeight: t == value
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: t == value
+                                  ? AppColors.textStrong
+                                  : AppColors.textSecondary,
+                            ),
+                          ),
+                          if (t == _Tab.requests && requests > 0) ...[
+                            const SizedBox(width: 5),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.warning,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$requests',
+                                style: AppType.sans(
+                                  fontSize: AppType.micro,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────── Details ───────────────────────────
+
+/// One appointment: who, when, why, and what to do next. Always re-reads the
+/// appointment on open and after a consultation, so its status is current.
 class AppointmentDetailsScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> appointment;
-  const AppointmentDetailsScreen({super.key, required this.appointment});
+
+  /// Replaces the Prescription section — the physio module shows its
+  /// treatment course, exercise plan and assessment here instead. Receives
+  /// the current appointment (re-read after every action).
+  final Widget Function(BuildContext context, Map<String, dynamic> appointment)?
+  careSection;
+
+  /// "appointment" or "session", for button labels.
+  final String noun;
+
+  const AppointmentDetailsScreen({
+    super.key,
+    required this.appointment,
+    this.careSection,
+    this.noun = 'appointment',
+  });
 
   @override
   ConsumerState<AppointmentDetailsScreen> createState() =>
@@ -502,985 +430,821 @@ class AppointmentDetailsScreen extends ConsumerStatefulWidget {
 
 class _AppointmentDetailsScreenState
     extends ConsumerState<AppointmentDetailsScreen> {
-  final ApiService _api = ApiService();
-  Map<String, dynamic>? _prescription;
-  bool _loadingPrescription = true;
+  late Map<String, dynamic> _a = widget.appointment;
+  bool _busy = false;
+  bool _chatLoading = false;
+
+  String get _id => '${_a['_id'] ?? ''}';
 
   @override
   void initState() {
     super.initState();
-    _loadPrescription();
+    Future.microtask(_reload);
   }
 
+  Future<void> _reload() async {
+    if (_id.isEmpty) return;
+    try {
+      final fresh = await ref
+          .read(doctorAppointmentsProvider.notifier)
+          .refreshOne(_id);
+      if (fresh != null && mounted) setState(() => _a = fresh);
+    } catch (_) {
+      // Keep what the list handed over; it's still accurate enough to act on.
+    }
+    await _loadPrescription();
+  }
+
+  /// Asks the prescriptions provider for this visit's prescription; the
+  /// screen then reads it from the provider, so issuing or editing it from
+  /// anywhere shows up here too.
   Future<void> _loadPrescription() async {
     try {
-      final aptId = widget.appointment['_id']?.toString() ?? '';
-      if (aptId.isEmpty) return;
-      final res = await _api.getPrescriptionByAppointment(aptId);
-      final raw = res.data is Map ? res.data['prescription'] : null;
-      if (raw is Map && mounted) {
-        setState(() => _prescription = Map<String, dynamic>.from(raw));
-      }
+      await ref.read(doctorPrescriptionsProvider.notifier).forAppointment(_id);
     } catch (_) {
-      // A 404 simply means no appointment-linked prescription exists yet.
-    }
-    if (mounted) setState(() => _loadingPrescription = false);
-  }
-
-  Future<void> _changeStatus(String status) async {
-    final id = widget.appointment['_id'] ?? '';
-    if (id.isEmpty) return;
-
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final success = await ref
-        .read(appointmentActionsProvider.notifier)
-        .updateStatus(id, status);
-
-    if (mounted) Navigator.pop(context); // hide loading
-
-    if (success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Appointment marked as $status',
-            style: const TextStyle(color: Colors.white),
-          ),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-      Navigator.of(context).pop(true); // Return true to refresh previous screen
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to update status'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
+      // Not fatal: the section just offers to write one.
     }
   }
 
-  Future<void> _makePhoneCall(String phone) async {
-    if (phone.isEmpty || phone == 'N/A') return;
-    final Uri uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
-
-  bool _loadingChat = false;
-
-  Future<void> _openInAppChat(
-    String patientId,
-    String patientName,
-    String appointmentId,
-  ) async {
-    if (patientId.isEmpty) return;
-    final profile = ref.read(doctorDashboardProvider).profile;
-    if (profile.isEmpty) return;
-
-    final profId = profile['_id'];
-
-    setState(() => _loadingChat = true);
-    try {
-      final res = await _api.getOrCreateChatSession({
-        'patientId': patientId,
-        if (appointmentId.isNotEmpty) 'appointmentId': appointmentId,
-      });
-
-      if (res.data['success']) {
-        final session = res.data['session'];
-        if (mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => AppChatScreen(
-                sessionId: session['_id'],
-                patientName: patientName,
-                patientId: patientId,
-                professionalId: profId,
-                professionalType: 'doctor',
-              ),
-            ),
-          );
-        }
-      } else {
-        if (mounted)
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Failed to start chat')));
+  /// The current (not cancelled or superseded) prescription for this visit.
+  Map<String, dynamic>? _rxFor(DoctorPrescriptionsState s) {
+    for (final rx in s.items) {
+      final appt = rx['appointmentId'];
+      final apptId = appt is Map ? '${appt['_id']}' : '${appt ?? ''}';
+      final status = '${rx['status'] ?? ''}';
+      if (apptId == _id && status != 'cancelled' && status != 'superseded') {
+        return rx;
       }
+    }
+    return null;
+  }
+
+  Future<void> _run(
+    Future<Map<String, dynamic>?> Function() action,
+    String done,
+  ) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final updated = await action();
+      if (!mounted) return;
+      if (updated != null) setState(() => _a = {..._a, ...updated});
+      _toast(done);
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      _toast(doctorError(e), error: true);
     } finally {
-      if (mounted) setState(() => _loadingChat = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _openMaps(Map<String, dynamic> apt) async {
-    final loc = apt['location'];
-    if (loc != null &&
-        loc['coordinates'] is List &&
-        (loc['coordinates'] as List).length == 2) {
-      final lng = loc['coordinates'][0];
-      final lat = loc['coordinates'][1];
-      final Uri uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
-      );
-      if (await canLaunchUrl(uri)) await launchUrl(uri);
-    } else if (apt['address'] != null) {
-      final Uri uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(apt['address'].toString())}',
-      );
-      if (await canLaunchUrl(uri)) await launchUrl(uri);
-    }
+  Future<void> _accept() => _run(
+    () => ref.read(doctorAppointmentsProvider.notifier).accept(_id),
+    'Accepted — added to your schedule',
+  );
+
+  Future<void> _decline() async {
+    final ok = await AppModal.confirm(
+      context,
+      title: 'Decline this request?',
+      message: '${patientName(_a)} is told you can’t take this appointment.',
+      confirmLabel: 'Decline',
+      cancelLabel: 'Keep',
+    );
+    if (!ok) return;
+    await _run(
+      () => ref.read(doctorAppointmentsProvider.notifier).decline(_id),
+      'Request declined',
+    );
   }
 
-  Future<void> _openConsultation() async {
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            ProfessionalConsultationScreen(appointment: widget.appointment),
+  Future<void> _cancel() async {
+    final reason = await showAppSheet<String>(
+      context,
+      builder: (_) => const _CancelSheet(),
+    );
+    if (reason == null) return;
+    await _run(
+      () => ref
+          .read(doctorAppointmentsProvider.notifier)
+          .cancel(_id, reason: reason),
+      'Appointment cancelled — the patient has been told',
+    );
+  }
+
+  Future<void> _noShow() async {
+    final ok = await AppModal.confirm(
+      context,
+      title: 'Mark as no-show?',
+      message:
+          '${patientName(_a)} didn’t turn up. The slot is closed and the visit won’t count as completed.',
+      confirmLabel: 'Mark no-show',
+      cancelLabel: 'Back',
+    );
+    if (!ok) return;
+    await _run(
+      () => ref.read(doctorAppointmentsProvider.notifier).markNoShow(_id),
+      'Marked as no-show',
+    );
+  }
+
+  Future<void> _consult() async {
+    await Navigator.of(context).push(
+      AppPageRoute(
+        builder: (_) => ProfessionalConsultationScreen(appointment: _a),
       ),
     );
-    await _loadPrescription();
-    if (result == true && mounted) Navigator.of(context).pop(true);
+    // Whatever happened in there (started, ended, prescribed), read it back.
+    await _reload();
   }
 
-  Future<void> _cancelAppointment() async {
-    final id = widget.appointment['_id']?.toString() ?? '';
-    if (id.isEmpty) return;
-    final confirmed = await AppDialog.confirm(
-      context,
-      title: 'Cancel appointment?',
-      message: 'The patient will see this appointment as cancelled.',
-      icon: CupertinoIcons.calendar_badge_minus,
-      cancelLabel: 'Keep',
-      confirmLabel: 'Cancel appointment',
-      destructive: true,
+  Future<void> _writePrescription() async {
+    final p = apptPatient(_a);
+    final saved = await Navigator.of(context).push<bool>(
+      AppPageRoute(
+        builder: (_) => CreatePrescriptionScreen(
+          initialPatientId: p['_id']?.toString(),
+          initialPatientName: patientName(_a),
+          initialAppointmentId: _id,
+        ),
+      ),
     );
-    if (!confirmed) return;
+    if (saved == true || mounted) await _loadPrescription();
+  }
+
+  Future<void> _call() async {
+    final phone = '${apptPatient(_a)['phone'] ?? ''}'.replaceAll(' ', '');
+    if (phone.isEmpty) return;
+    if (!await launchUrl(Uri(scheme: 'tel', path: phone))) {
+      _toast('No dialler available', error: true);
+    }
+  }
+
+  Future<void> _chat() async {
+    final p = apptPatient(_a);
+    final patientId = '${p['_id'] ?? ''}';
+    if (patientId.isEmpty || _chatLoading) return;
+    setState(() => _chatLoading = true);
     try {
-      await _api.cancelAppointment(id, reason: 'Cancelled by professional');
+      final doctorId = await ref
+          .read(doctorProfileProvider.notifier)
+          .doctorIdOrLoad();
+      final sessionId = await ref
+          .read(doctorAppointmentsProvider.notifier)
+          .chatSession(patientId: patientId, appointmentId: _id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Appointment cancelled'),
-          backgroundColor: AppTheme.success,
+      await Navigator.of(context).push(
+        AppPageRoute(
+          builder: (_) => AppChatScreen(
+            sessionId: sessionId,
+            patientName: patientName(_a),
+            patientId: patientId,
+            professionalId: doctorId,
+            professionalType: 'doctor',
+          ),
         ),
       );
-      Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Unable to cancel: $e'),
-            backgroundColor: AppTheme.error,
-          ),
+      _toast(
+        e is StateError
+            ? e.message
+            : doctorError(e, fallback: 'Couldn’t open the chat.'),
+        error: true,
+      );
+    } finally {
+      if (mounted) setState(() => _chatLoading = false);
+    }
+  }
+
+  Future<void> _maps() async {
+    final loc = _a['location'];
+    Uri? uri;
+    if (loc is Map && loc['coordinates'] is List) {
+      final c = loc['coordinates'] as List;
+      if (c.length == 2) {
+        uri = Uri.parse(
+          'https://www.google.com/maps/search/?api=1&query=${c[1]},${c[0]}',
         );
       }
     }
+    final address = '${_a['address'] ?? ''}'.trim();
+    uri ??= address.isEmpty
+        ? null
+        : Uri.parse(
+            'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(address)}',
+          );
+    if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: AppType.sans(fontSize: AppType.caption, color: Colors.white),
+        ),
+        backgroundColor: error ? AppColors.error : AppColors.textStrong,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final apt = widget.appointment;
-    final appointmentId = apt['_id']?.toString() ?? '';
-    final patient = apt['patientId'];
-    final patientIdStr = patient is Map
-        ? (patient['_id']?.toString() ?? '')
-        : patient?.toString() ?? '';
-    final patientName = patient is Map
-        ? (patient['name'] ?? 'Patient')
-        : 'Patient';
-    final patientPhone = patient is Map ? (patient['phone'] ?? 'N/A') : 'N/A';
-    final patientAge = patient is Map ? (patient['age'] ?? 'N/A') : 'N/A';
-    final patientGender = patient is Map ? (patient['gender'] ?? 'N/A') : 'N/A';
-
-    final status = (apt['status'] ?? 'pending').toString();
-    final type = (apt['type'] ?? 'clinic').toString();
-    final symptoms = apt['symptoms'] is List
-        ? (apt['symptoms'] as List).join(', ')
-        : 'N/A';
-    final reason = apt['reason']?.toString().isEmpty ?? true
-        ? 'N/A'
-        : apt['reason'];
-    final fee = apt['consultationFee'] ?? apt['totalAmount'] ?? 0;
-    final platformFee = apt['platformCommission'] ?? 0;
-    final earning = apt['professionalEarning'] ?? 0;
-
-    // Date & Time
-    String dateStr = '';
-    if (apt['appointmentDate'] != null) {
-      try {
-        final d = DateTime.parse(apt['appointmentDate']);
-        dateStr = '${d.day}/${d.month}/${d.year}';
-      } catch (_) {}
-    }
-
-    final statusColor = status == 'confirmed' || status == 'accepted'
-        ? AppTheme.primary
-        : status == 'pending'
-        ? AppTheme.warning
-        : status == 'cancelled'
-        ? AppTheme.error
-        : AppTheme.success;
+    final rx = _rxFor(ref.watch(doctorPrescriptionsProvider));
+    final status = apptStatus(_a);
+    final start = apptStart(_a);
+    final end = apptEnd(_a);
+    final p = apptPatient(_a);
+    final type = apptType(_a);
+    final symptoms = (_a['symptoms'] is List)
+        ? (_a['symptoms'] as List)
+              .map((e) => '$e')
+              .where((e) => e.isNotEmpty)
+              .toList()
+        : const <String>[];
+    final reason = '${_a['reason'] ?? _a['notes'] ?? ''}'.trim();
+    final address = '${_a['address'] ?? ''}'.trim();
+    final started = start != null && DateTime.now().isAfter(start);
+    final accent = ModuleAccent.of(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: Text(
-          'Appointment Details',
-          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-        ),
-        backgroundColor: Colors.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppColors.bg,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+        titleSpacing: 0,
+        title: Text(
+          widget.noun == 'session' ? 'Session' : 'Appointment',
+          style: AppType.sans(
+            fontSize: AppType.title,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(child: ApptStatusTag(status)),
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Status and Date Card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Status',
-                        style: GoogleFonts.manrope(
-                          fontSize: 14,
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          status.toUpperCase(),
-                          style: GoogleFonts.manrope(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: statusColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _buildInfoCol('Date', dateStr, CupertinoIcons.calendar),
-                      _buildInfoCol(
-                        'Time',
-                        apt['startTime'] ?? '',
-                        CupertinoIcons.clock,
-                      ),
-                      _buildInfoCol(
-                        'Type',
-                        type,
-                        type == 'video'
-                            ? CupertinoIcons.video_camera
-                            : type == 'home'
-                            ? CupertinoIcons.house
-                            : Icons.local_hospital_outlined,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Patient Info
-            Text(
-              'Patient Information',
-              style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          gradient: AppTheme.doctorGradient,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            patientName[0],
-                            style: GoogleFonts.manrope(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              patientName,
-                              style: GoogleFonts.manrope(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                            Text(
-                              '$patientGender, $patientAge years',
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          _loadingChat
-                              ? const Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                )
-                              : IconButton(
-                                  onPressed: () => _openInAppChat(
-                                    patientIdStr,
-                                    patientName,
-                                    appointmentId,
-                                  ),
-                                  icon: const Icon(
-                                    CupertinoIcons.chat_bubble_2,
-                                    color: AppTheme.primary,
-                                  ),
-                                ),
-                          IconButton(
-                            onPressed: () => _makePhoneCall(patientPhone),
-                            icon: const Icon(
-                              CupertinoIcons.phone,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Divider(height: 1),
-                  ),
-                  _buildDetailRow('Phone', patientPhone),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Symptoms', symptoms),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Reason', reason),
-                  if (type == 'home' && apt['address'] != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Patient Location',
-                      style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: () => _openMaps(apt),
+            Expanded(
+              child: RefreshIndicator(
+                color: accent.color,
+                onRefresh: _reload,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  children: [
+                    // When — the thing a doctor checks first.
+                    AppEntrance(
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppTheme.primary.withValues(alpha: 0.2),
-                          ),
+                          color: accent.veryLight,
+                          borderRadius: BorderRadius.circular(16),
                         ),
                         child: Row(
                           children: [
-                            const Icon(
-                              CupertinoIcons.location_solid,
-                              color: AppTheme.primary,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    apt['address'],
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 13,
+                                    dayLabel(start),
+                                    style: AppType.sans(
+                                      fontSize: AppType.small,
                                       fontWeight: FontWeight.w600,
-                                      color: AppTheme.primary,
+                                      color: accent.color,
                                     ),
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Tap to view on Google Maps',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 11,
-                                      color: AppTheme.primary.withValues(
-                                        alpha: 0.7,
-                                      ),
+                                    end == null || end == start
+                                        ? timeLabel(start)
+                                        : '${timeLabel(start)} – ${timeLabel(end)}',
+                                    style: AppType.sans(
+                                      fontSize: AppType.figure,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textStrong,
                                     ),
                                   ),
+                                  const SizedBox(height: 4),
+                                  ApptTypeTag(type),
                                 ],
                               ),
                             ),
-                            const Icon(
-                              CupertinoIcons.arrow_branch,
-                              color: AppTheme.primary,
-                              size: 20,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  appRupees(apptFee(_a)),
+                                  style: AppType.sans(
+                                    fontSize: AppType.title,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textStrong,
+                                  ),
+                                ),
+                                Text(
+                                  apptPaid(_a)
+                                      ? 'Paid online'
+                                      : type == 'clinic'
+                                      ? 'Collect at clinic'
+                                      : 'Not paid yet',
+                                  style: AppType.sans(
+                                    fontSize: AppType.caption,
+                                    fontWeight: FontWeight.w600,
+                                    color: apptPaid(_a)
+                                        ? accent.color
+                                        : AppColors.warning,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
                     ),
-                  ],
-                  if ([
-                    'confirmed',
-                    'accepted',
-                    'in_progress',
-                    'completed',
-                  ].contains(status)) ...[
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: _openConsultation,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppTheme.primary.withValues(alpha: 0.2),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              type == 'video'
-                                  ? CupertinoIcons.video_camera_solid
-                                  : Icons.medical_services_outlined,
-                              color: AppTheme.primary,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    status == 'completed'
-                                        ? 'View Consultation Summary'
-                                        : 'Open Consultation Workspace',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                                  Text(
-                                    type == 'video'
-                                        ? 'Start/join the secure video room from here'
-                                        : 'Clinical notes, prescription and completion',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 11,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(
-                              CupertinoIcons.chevron_right,
-                              color: AppTheme.primary,
-                              size: 18,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Prescription Details
-            if (status == 'completed' ||
-                status == 'confirmed' ||
-                status == 'accepted' ||
-                status == 'in_progress') ...[
-              Text(
-                'Prescription',
-                style: GoogleFonts.manrope(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (_loadingPrescription)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: CircularProgressIndicator(),
-                  ),
-                )
-              else if (_prescription != null)
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                    const SizedBox(height: 20),
+                    const AppSectionTitle('Patient'),
+                    AppEntrance(
+                      index: 1,
+                      child: AppGroup(
                         children: [
-                          const Icon(
-                            CupertinoIcons.doc_text,
-                            color: AppTheme.primary,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              (_prescription!['status'] == 'draft'
-                                  ? 'Draft Prescription'
-                                  : 'Issued Prescription'),
-                              style: GoogleFonts.manrope(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
-                              ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                            child: Row(
+                              children: [
+                                DoctorAvatar(name: patientName(_a), size: 42),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        patientName(_a),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: AppType.sans(
+                                          fontSize: AppType.title,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.textStrong,
+                                        ),
+                                      ),
+                                      Text(
+                                        [
+                                          if (p['age'] != null)
+                                            '${p['age']} yrs',
+                                          if ('${p['gender'] ?? ''}'.isNotEmpty)
+                                            capitalised('${p['gender']}'),
+                                          if ('${p['phone'] ?? ''}'.isNotEmpty)
+                                            '${p['phone']}',
+                                        ].join(' · '),
+                                        style: AppType.sans(
+                                          fontSize: AppType.caption,
+                                          color: AppColors.textTertiary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                _RoundAction(
+                                  icon: LucideIcons.messageCircle,
+                                  label: 'Chat with patient',
+                                  loading: _chatLoading,
+                                  onTap: _chat,
+                                ),
+                                const SizedBox(width: 6),
+                                _RoundAction(
+                                  icon: LucideIcons.phone,
+                                  label: 'Call patient',
+                                  onTap: '${p['phone'] ?? ''}'.isEmpty
+                                      ? null
+                                      : _call,
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      if (_prescription!['diagnosis'] != null &&
-                          _prescription!['diagnosis']
-                              .toString()
+                    ),
+                    const SizedBox(height: 20),
+                    const AppSectionTitle('Visit'),
+                    AppEntrance(
+                      index: 2,
+                      child: AppGroup(
+                        children: [
+                          _row(
+                            LucideIcons.stethoscope,
+                            'Symptoms',
+                            symptoms.isEmpty
+                                ? 'Not shared'
+                                : symptoms.join(', '),
+                            muted: symptoms.isEmpty,
+                          ),
+                          if (reason.isNotEmpty) ...[
+                            const AppHairline(),
+                            _row(
+                              LucideIcons.notebookPen,
+                              'Patient’s note',
+                              reason,
+                            ),
+                          ],
+                          if (type == 'home' && address.isNotEmpty) ...[
+                            const AppHairline(),
+                            InkWell(
+                              onTap: _maps,
+                              child: _row(
+                                LucideIcons.mapPin,
+                                'Visit address',
+                                address,
+                                trailing: Icon(
+                                  LucideIcons.navigation,
+                                  size: 16,
+                                  color: accent.color,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if ('${_a['appointmentNumber'] ?? ''}'
                               .isNotEmpty) ...[
-                        _buildDetailRow(
-                          'Diagnosis',
-                          _prescription!['diagnosis'] is List
-                              ? (_prescription!['diagnosis'] as List).join(', ')
-                              : _prescription!['diagnosis'].toString(),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      if (_prescription!['medicines'] != null &&
-                          (_prescription!['medicines'] as List).isNotEmpty) ...[
-                        Text(
-                          'Medicines:',
-                          style: GoogleFonts.manrope(
-                            fontSize: 13,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        ...(_prescription!['medicines'] as List).map((m) {
-                          final name = m is Map
-                              ? (m['medicineName'] ?? m['name'] ?? '')
-                              : m.toString();
-                          final dosage = m is Map ? (m['dosage'] ?? '') : '';
-                          return Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 4,
-                                margin: const EdgeInsets.only(right: 8),
-                                decoration: const BoxDecoration(
-                                  color: AppTheme.primary,
-                                  shape: BoxShape.circle,
+                            const AppHairline(),
+                            _row(
+                              LucideIcons.hash,
+                              'Booking',
+                              '${_a['appointmentNumber']}',
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (widget.careSection != null) ...[
+                      const SizedBox(height: 20),
+                      widget.careSection!(context, _a),
+                    ] else if (const {
+                      'confirmed',
+                      'in_progress',
+                      'completed',
+                    }.contains(status)) ...[
+                      const SizedBox(height: 20),
+                      const AppSectionTitle('Prescription'),
+                      AppEntrance(
+                        index: 3,
+                        child: AppGroup(
+                          children: [
+                            InkWell(
+                              onTap: rx == null
+                                  ? _writePrescription
+                                  : () => Navigator.of(context)
+                                        .push(
+                                          AppPageRoute(
+                                            builder: (_) =>
+                                                PrescriptionDetailsScreen(
+                                                  prescription: rx,
+                                                ),
+                                          ),
+                                        )
+                                        .then((_) => _loadPrescription()),
+                              child: _row(
+                                rx == null
+                                    ? LucideIcons.filePlus2
+                                    : LucideIcons.fileText,
+                                rx == null
+                                    ? 'Write prescription'
+                                    : '${rx['prescriptionNumber'] ?? 'Prescription'}',
+                                rx == null
+                                    ? 'Medicines, tests and advice for this visit'
+                                    : _rxSummary(rx),
+                                strongTitle: true,
+                                trailing: const Icon(
+                                  LucideIcons.chevronRight,
+                                  size: 16,
+                                  color: AppColors.textDisabled,
                                 ),
                               ),
-                              Expanded(
-                                child: Text(
-                                  '$name${dosage.isNotEmpty ? ' - $dosage' : ''}',
-                                  style: GoogleFonts.manrope(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        }),
-                      ],
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            if (_prescription != null) {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => PrescriptionDetailsScreen(
-                                    prescription: _prescription!,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                          icon: const Icon(CupertinoIcons.eye, size: 16),
-                          label: Text(
-                            'View Details',
-                            style: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
+                          ],
                         ),
                       ),
                     ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(
-                          CupertinoIcons.doc,
-                          size: 32,
-                          color: AppTheme.textTertiary.withValues(alpha: 0.5),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No prescription written',
-                          style: GoogleFonts.manrope(
-                            fontSize: 14,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: () async {
-                            final result = await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => CreatePrescriptionScreen(
-                                  initialPatientId: patient is Map
-                                      ? patient['_id']
-                                      : patient,
-                                  initialPatientName: patientName,
-                                  initialAppointmentId: apt['_id'],
-                                ),
-                              ),
-                            );
-                            if (result == true) _loadPrescription();
-                          },
-                          icon: const Icon(CupertinoIcons.pencil, size: 16),
-                          label: Text(
-                            'Write Prescription',
-                            style: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 ),
-              const SizedBox(height: 20),
-            ],
-
-            // Payment Info
-            Text(
-              'Payment Details',
-              style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
               ),
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                children: [
-                  _buildDetailRow(
-                    'Total Fee Paid',
-                    '₹$fee',
-                    valueWeight: FontWeight.w700,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildDetailRow(
-                    'Platform Commission',
-                    '- ₹$platformFee',
-                    valueColor: AppTheme.error,
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Divider(height: 1),
-                  ),
-                  _buildDetailRow(
-                    'Your Net Earning',
-                    '₹$earning',
-                    valueColor: AppTheme.success,
-                    valueWeight: FontWeight.w700,
-                    valueSize: 16,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 40),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _buildBottomActions(status),
-    );
-  }
-
-  Widget? _buildBottomActions(String status) {
-    if (status == 'cancelled' || status == 'completed') return null;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            if (status == 'pending') ...[
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _changeStatus('rejected'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.error,
-                    side: const BorderSide(color: AppTheme.error),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Reject',
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _changeStatus('accepted'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Accept',
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ] else if (status == 'confirmed' || status == 'accepted') ...[
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _cancelAppointment,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.error,
-                    side: const BorderSide(color: AppTheme.error),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Cancel',
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _openConsultation,
-                  icon: const Icon(Icons.medical_services_outlined, size: 18),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  label: Text(
-                    'Consult',
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ] else if (status == 'in_progress') ...[
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _openConsultation,
-                  icon: const Icon(Icons.medical_services_outlined, size: 18),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  label: Text(
-                    'Continue Consultation',
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ],
+            _actionBar(status, started),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInfoCol(String label, String value, IconData icon) {
-    return Column(
-      children: [
-        Icon(icon, size: 20, color: AppTheme.textTertiary),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: GoogleFonts.manrope(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        Text(
-          label,
-          style: GoogleFonts.manrope(
-            fontSize: 11,
-            color: AppTheme.textTertiary,
-          ),
-        ),
-      ],
-    );
+  String _rxSummary(Map<String, dynamic> rx) {
+    final dx = rx['diagnosis'] is List
+        ? (rx['diagnosis'] as List).map((e) => '$e').join(', ')
+        : '';
+    final meds = rx['medicines'] is List ? (rx['medicines'] as List).length : 0;
+    final status = '${rx['status'] ?? ''}';
+    return [
+      if (status == 'draft') 'Draft',
+      if (dx.isNotEmpty) dx,
+      '$meds medicine${meds == 1 ? '' : 's'}',
+    ].join(' · ');
   }
 
-  Widget _buildDetailRow(
-    String label,
+  Widget _row(
+    IconData icon,
+    String title,
     String value, {
-    Color? valueColor,
-    FontWeight? valueWeight,
-    double? valueSize,
-  }) {
-    return Row(
+    bool muted = false,
+    bool strongTitle = false,
+    Widget? trailing,
+  }) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+    child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 16, color: AppColors.textTertiary),
+        ),
+        const SizedBox(width: 12),
         Expanded(
-          flex: 2,
-          child: Text(
-            label,
-            style: GoogleFonts.manrope(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: AppType.sans(
+                  fontSize: strongTitle ? AppType.body : AppType.caption,
+                  fontWeight: strongTitle ? FontWeight.w600 : FontWeight.w500,
+                  color: strongTitle
+                      ? AppColors.textPrimary
+                      : AppColors.textTertiary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: AppType.sans(
+                  fontSize: strongTitle ? AppType.caption : AppType.body,
+                  color: muted || strongTitle
+                      ? AppColors.textSecondary
+                      : AppColors.textPrimary,
+                ),
+              ),
+            ],
           ),
         ),
-        Expanded(
-          flex: 3,
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: GoogleFonts.manrope(
-              fontSize: valueSize ?? 13,
-              fontWeight: valueWeight ?? FontWeight.w500,
-              color: valueColor ?? AppTheme.textPrimary,
-            ),
-          ),
-        ),
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
+      ],
+    ),
+  );
+
+  Widget _actionBar(String status, bool started) {
+    Widget bar(Widget child) => Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: child,
+    );
+    Widget pair(Widget left, Widget right) => Row(
+      children: [
+        Expanded(child: left),
+        const SizedBox(width: 10),
+        Expanded(flex: 2, child: right),
       ],
     );
+
+    switch (status) {
+      case 'pending':
+        return bar(
+          pair(
+            AppSecondaryButton(
+              label: 'Decline',
+              color: AppColors.error,
+              onPressed: _busy ? null : _decline,
+            ),
+            AppButton(
+              label: 'Accept',
+              icon: LucideIcons.check,
+              loading: _busy,
+              onPressed: _busy ? null : _accept,
+            ),
+          ),
+        );
+      case 'confirmed':
+      case 'rescheduled':
+        return bar(
+          pair(
+            started
+                ? AppSecondaryButton(
+                    label: 'No-show',
+                    color: AppColors.error,
+                    onPressed: _busy ? null : _noShow,
+                  )
+                : AppSecondaryButton(
+                    label: 'Cancel',
+                    color: AppColors.error,
+                    onPressed: _busy ? null : _cancel,
+                  ),
+            AppButton(
+              label: apptType(_a) == 'video'
+                  ? (widget.noun == 'session'
+                        ? 'Start video session'
+                        : 'Start video consult')
+                  : (widget.noun == 'session'
+                        ? 'Start session'
+                        : 'Start consultation'),
+              icon: apptType(_a) == 'video'
+                  ? LucideIcons.video
+                  : LucideIcons.stethoscope,
+              loading: _busy,
+              onPressed: _busy ? null : _consult,
+            ),
+          ),
+        );
+      case 'in_progress':
+        return bar(
+          AppButton(
+            label: widget.noun == 'session'
+                ? 'Continue session'
+                : 'Continue consultation',
+            icon: LucideIcons.stethoscope,
+            onPressed: _consult,
+          ),
+        );
+      case 'completed':
+        return bar(
+          AppSecondaryButton(
+            label: widget.noun == 'session'
+                ? 'Open session notes'
+                : 'Open consultation notes',
+            icon: LucideIcons.notebookText,
+            onPressed: _consult,
+          ),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
   }
+}
+
+class _RoundAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool loading;
+  const _RoundAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context).color;
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkResponse(
+        onTap: onTap == null || loading
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                onTap!();
+              },
+        radius: 22,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: const BoxDecoration(
+            color: AppColors.bg,
+            shape: BoxShape.circle,
+          ),
+          child: loading
+              ? Padding(
+                  padding: const EdgeInsets.all(11),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: accent,
+                  ),
+                )
+              : Icon(
+                  icon,
+                  size: 17,
+                  color: onTap == null ? AppColors.textDisabled : accent,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Why the doctor is cancelling — the patient sees it. Owns its controller.
+class _CancelSheet extends StatefulWidget {
+  const _CancelSheet();
+
+  @override
+  State<_CancelSheet> createState() => _CancelSheetState();
+}
+
+class _CancelSheetState extends State<_CancelSheet> {
+  static const _reasons = [
+    'I’m unavailable at this time',
+    'Emergency at the clinic',
+    'Patient asked to cancel',
+  ];
+  String? _picked;
+  final _other = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _other.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _other.dispose();
+    super.dispose();
+  }
+
+  String get _reason =>
+      _picked == 'other' ? _other.text.trim() : (_picked ?? '');
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Cancel appointment',
+          style: AppType.sans(
+            fontSize: AppType.title,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textStrong,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'The patient sees this reason. A prepaid fee is handled by our refund policy.',
+          style: AppType.sans(
+            fontSize: AppType.caption,
+            color: AppColors.textTertiary,
+          ),
+        ),
+        const SizedBox(height: 14),
+        for (final r in [..._reasons, 'other'])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: AppFilterChip(
+              block: true,
+              label: r == 'other' ? 'Another reason' : r,
+              selected: _picked == r,
+              onTap: () => setState(() => _picked = r),
+            ),
+          ),
+        if (_picked == 'other')
+          AppTextField(
+            label: 'Reason',
+            controller: _other,
+            dense: true,
+            textCapitalization: TextCapitalization.sentences,
+            margin: const EdgeInsets.only(top: 6),
+          ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: AppSecondaryButton(
+                label: 'Back',
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: AppButton(
+                label: 'Cancel appointment',
+                onPressed: _reason.isEmpty
+                    ? null
+                    : () => Navigator.pop(context, _reason),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 }

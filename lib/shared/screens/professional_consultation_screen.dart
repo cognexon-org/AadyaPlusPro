@@ -1,18 +1,22 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/network/api_service.dart';
-import '../../core/theme/app_theme.dart';
-import '../widgets/app_dialog.dart';
 import '../../features/doctor/screens/doctor_prescriptions.dart';
 import '../../features/doctor/screens/prescription_details.dart';
+import '../../features/doctor/widgets/doctor_ui.dart';
+import '../../features/physio/screens/physio_exercise_plan_editor.dart';
+import '../ui/app_ui.dart';
 import 'app_web_view.dart';
 
-/// Professional-side Patch-4 consultation workspace shared by doctors and
-/// physiotherapists. It deliberately uses the consultation session as the
-/// lifecycle source of truth instead of mutating Appointment.status directly.
+/// The consultation workspace shared by doctors and physiotherapists. The
+/// consultation session (not Appointment.status) drives the lifecycle: the
+/// server says whether the professional can start, join or end right now.
+///
+/// Pops `true` once the consultation has been ended, so the caller can
+/// refresh the appointment.
 class ProfessionalConsultationScreen extends StatefulWidget {
   final Map<String, dynamic> appointment;
 
@@ -25,775 +29,895 @@ class ProfessionalConsultationScreen extends StatefulWidget {
 
 class _ProfessionalConsultationScreenState
     extends State<ProfessionalConsultationScreen> {
-  final ApiService _api = ApiService();
-  final _chiefComplaintController = TextEditingController();
-  final _diagnosisController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _adviceController = TextEditingController();
-  final _followUpNotesController = TextEditingController();
+  static const _outcomes = {
+    'resolved': 'Resolved',
+    'improved': 'Improved',
+    'ongoing': 'Ongoing',
+    'referred': 'Referred',
+    'emergency_referral': 'Emergency referral',
+  };
 
-  Map<String, dynamic>? _appointment;
+  final _api = ApiService();
+  final _notes = TextEditingController();
+  final _advice = TextEditingController();
+  final _followUpNotes = TextEditingController();
+
+  late Map<String, dynamic> _appointment = Map.of(widget.appointment);
   Map<String, dynamic>? _session;
   Map<String, dynamic>? _prescription;
-  bool _loading = true;
-  bool _busy = false;
+  List<String> _complaints = [];
+  List<String> _diagnoses = [];
+  String _outcome = 'unknown';
   bool _followUpRequired = false;
   DateTime? _followUpDate;
-  String _outcome = 'unknown';
+
+  bool _loading = true;
+  bool _busy = false;
+  bool _ended = false;
+  bool _dirty = false;
   String? _error;
+  bool _diagnosisMissing = false;
 
-  String get _appointmentId =>
-      (_appointment?['_id'] ?? widget.appointment['_id'] ?? '').toString();
+  String get _id => '${_appointment['_id'] ?? ''}';
+  bool get _isVideo => apptType(_appointment) == 'video';
 
-  bool get _isVideo =>
-      (_appointment?['type'] ?? widget.appointment['type']) == 'video';
-
-  Map<String, dynamic> get _patient {
-    final raw = _appointment?['patientId'] ?? widget.appointment['patientId'];
-    return raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
-  }
+  /// Physio sessions get a home exercise programme instead of a medicine
+  /// prescription, and "session" wording.
+  bool get _isPhysio =>
+      '${_appointment['professionalType'] ?? ''}' == 'physio' ||
+      _appointment['physioId'] != null;
 
   @override
   void initState() {
     super.initState();
-    _appointment = Map<String, dynamic>.from(widget.appointment);
+    for (final c in [_notes, _advice, _followUpNotes]) {
+      c.addListener(_markDirty);
+    }
     _load();
+  }
+
+  void _markDirty() {
+    if (!_dirty && mounted) setState(() => _dirty = true);
   }
 
   @override
   void dispose() {
-    _chiefComplaintController.dispose();
-    _diagnosisController.dispose();
-    _notesController.dispose();
-    _adviceController.dispose();
-    _followUpNotesController.dispose();
+    _notes.dispose();
+    _advice.dispose();
+    _followUpNotes.dispose();
     super.dispose();
   }
 
-  Future<void> _load({bool keepBusy = false}) async {
-    if (!keepBusy && mounted) setState(() => _loading = true);
+  Future<void> _load({bool quiet = false}) async {
+    if (!quiet) setState(() => _loading = true);
     try {
-      final response = await _api.getConsultationByAppointment(_appointmentId);
-      final data = Map<String, dynamic>.from(response.data as Map);
-      final appointment = data['appointment'];
-      final session = data['session'];
-      if (appointment is Map) {
-        _appointment = Map<String, dynamic>.from(appointment);
-      }
-      if (session is Map) {
-        _session = Map<String, dynamic>.from(session);
-        _hydrateSummary(_session!['clinicalSummary']);
-      }
+      final res = await _api.getConsultationByAppointment(_id);
+      _merge(res.data, hydrate: true);
       await _loadPrescription();
       _error = null;
-    } on DioException catch (e) {
-      _error = _message(e);
     } catch (e) {
-      _error = e.toString();
+      _error = doctorError(e, fallback: 'Couldn’t load the consultation.');
     } finally {
-      if (mounted && !keepBusy) setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _hydrateSummary(dynamic raw) {
-    if (raw is! Map) return;
-    final summary = Map<String, dynamic>.from(raw);
-    if (_chiefComplaintController.text.isEmpty) {
-      _chiefComplaintController.text = _listText(summary['chiefComplaint']);
-    }
-    if (_diagnosisController.text.isEmpty) {
-      _diagnosisController.text = _listText(summary['diagnosis']);
-    }
-    if (_notesController.text.isEmpty) {
-      _notesController.text = summary['notes']?.toString() ?? '';
-    }
-    if (_adviceController.text.isEmpty) {
-      _adviceController.text = summary['advice']?.toString() ?? '';
-    }
-    if (_followUpNotesController.text.isEmpty) {
-      _followUpNotesController.text =
-          summary['followUpNotes']?.toString() ?? '';
-    }
-    _outcome = summary['outcome']?.toString() ?? _outcome;
-    _followUpRequired = summary['followUpRequired'] == true;
-    if (_followUpDate == null && summary['followUpDate'] != null) {
-      _followUpDate = DateTime.tryParse(summary['followUpDate'].toString());
-    }
-  }
-
+  /// Never fatal: a missing or unreadable prescription just shows as none.
   Future<void> _loadPrescription() async {
     try {
-      final response = await _api.getPrescriptionByAppointment(_appointmentId);
-      final raw = response.data is Map ? response.data['prescription'] : null;
+      final res = await _api.getPrescriptionByAppointment(_id);
+      final raw = res.data is Map ? res.data['prescription'] : null;
       _prescription = raw is Map ? Map<String, dynamic>.from(raw) : null;
-    } on DioException catch (e) {
-      if (e.response?.statusCode != 404) rethrow;
+    } catch (_) {
       _prescription = null;
     }
   }
 
-  Future<void> _start() async {
-    await _run(() async {
-      final response = await _api.startConsultation(_appointmentId);
-      _mergeResponse(response.data);
-    }, success: 'Consultation started');
-  }
-
-  Future<void> _joinVideo() async {
-    setState(() => _busy = true);
-    try {
-      final response = await _api.joinConsultation(_appointmentId);
-      final data = Map<String, dynamic>.from(response.data as Map);
-      final joinUrl = data['joinUrl']?.toString() ?? '';
-      if (joinUrl.isEmpty) throw StateError('Video room is not available');
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => AppWebView(
-            url: joinUrl,
-            title: 'Consultation: ${_patient['name'] ?? 'Patient'}',
-          ),
-        ),
-      );
-      try {
-        await _api.leaveConsultation(_appointmentId);
-      } catch (_) {}
-      await _load(keepBusy: true);
-    } on DioException catch (e) {
-      _show(_message(e), error: true);
-    } catch (e) {
-      _show(e.toString(), error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  void _merge(dynamic raw, {bool hydrate = false}) {
+    if (raw is! Map) return;
+    if (raw['appointment'] is Map) {
+      _appointment = Map<String, dynamic>.from(raw['appointment'] as Map);
+    }
+    if (raw['session'] is Map) {
+      _session = Map<String, dynamic>.from(raw['session'] as Map);
+      if (hydrate || !_dirty) _hydrate(_session!['clinicalSummary']);
     }
   }
 
-  Map<String, dynamic> _summaryPayload() => {
-    'chiefComplaint': _csv(_chiefComplaintController.text),
-    'diagnosis': _csv(_diagnosisController.text),
-    'notes': _notesController.text.trim(),
-    'advice': _adviceController.text.trim(),
+  void _hydrate(dynamic raw) {
+    if (raw is! Map) return;
+    List<String> list(dynamic v) => v is List
+        ? v.map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList()
+        : '${v ?? ''}'
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+    _complaints = list(raw['chiefComplaint']);
+    _diagnoses = list(raw['diagnosis']);
+    _notes.text = '${raw['notes'] ?? ''}';
+    _advice.text = '${raw['advice'] ?? ''}';
+    _followUpNotes.text = '${raw['followUpNotes'] ?? ''}';
+    _outcome = '${raw['outcome'] ?? 'unknown'}';
+    _followUpRequired = raw['followUpRequired'] == true;
+    _followUpDate = DateTime.tryParse(
+      '${raw['followUpDate'] ?? ''}',
+    )?.toLocal();
+    _dirty = false;
+  }
+
+  Map<String, dynamic> _summary() => {
+    'chiefComplaint': _complaints,
+    'diagnosis': _diagnoses,
+    'notes': _notes.text.trim(),
+    'advice': _advice.text.trim(),
     'outcome': _outcome,
     'followUpRequired': _followUpRequired,
     if (_followUpRequired && _followUpDate != null)
       'followUpDate': _followUpDate!.toUtc().toIso8601String(),
-    'followUpNotes': _followUpNotesController.text.trim(),
+    'followUpNotes': _followUpNotes.text.trim(),
   };
 
-  Future<void> _saveNotes() async {
-    await _run(() async {
-      final response = await _api.updateConsultationSummary(
-        _appointmentId,
-        _summaryPayload(),
-      );
-      _mergeResponse(response.data);
-    }, success: 'Clinical notes saved');
-  }
-
-  Future<void> _endConsultation() async {
-    final diagnosis = _csv(_diagnosisController.text);
-    if (diagnosis.isEmpty) {
-      _show(
-        'Add at least one diagnosis before ending the consultation.',
-        error: true,
-      );
-      return;
-    }
-
-    final confirmed = await AppDialog.confirm(
-      context,
-      title: 'End consultation?',
-      message:
-          'This completes the appointment and locks the clinical consultation summary.',
-      icon: CupertinoIcons.checkmark_seal,
-      confirmLabel: 'End consultation',
-    );
-    if (!confirmed) return;
-
-    await _run(() async {
-      final response = await _api.endConsultation(
-        _appointmentId,
-        _summaryPayload(),
-      );
-      _mergeResponse(response.data);
-    }, success: 'Consultation completed');
-  }
-
-  Future<void> _openPrescriptionEditor() async {
-    final patient = _patient;
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CreatePrescriptionScreen(
-          initialPatientId: patient['_id']?.toString(),
-          initialPatientName: patient['name']?.toString() ?? 'Patient',
-          initialAppointmentId: _appointmentId,
-        ),
-      ),
-    );
-    if (result == true) {
-      await _loadPrescription();
-      if (mounted) setState(() {});
-    }
-  }
-
-  Future<void> _issuePrescription() async {
-    final id = _prescription?['_id']?.toString();
-    if (id == null || id.isEmpty) return;
-    await _run(() async {
-      final response = await _api.issuePrescription(id);
-      final raw = response.data is Map ? response.data['prescription'] : null;
-      if (raw is Map) _prescription = Map<String, dynamic>.from(raw);
-    }, success: 'Prescription issued to patient');
-  }
-
-  Future<void> _run(
-    Future<void> Function() operation, {
-    required String success,
-  }) async {
+  Future<void> _run(Future<void> Function() op, String done) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await operation();
-      if (mounted) {
-        _show(success);
-        setState(() {});
-      }
-    } on DioException catch (e) {
-      _show(_message(e), error: true);
+      await op();
+      _toast(done);
     } catch (e) {
-      _show(e.toString(), error: true);
+      _toast(doctorError(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _mergeResponse(dynamic raw) {
-    if (raw is! Map) return;
-    final data = Map<String, dynamic>.from(raw);
-    if (data['appointment'] is Map) {
-      _appointment = Map<String, dynamic>.from(data['appointment'] as Map);
-    }
-    if (data['session'] is Map) {
-      _session = Map<String, dynamic>.from(data['session'] as Map);
-      _hydrateSummary(_session!['clinicalSummary']);
+  Future<void> _start() => _run(() async {
+    final res = await _api.startConsultation(_id);
+    _merge(res.data);
+  }, 'Consultation started');
+
+  Future<void> _joinVideo() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final res = await _api.joinConsultation(_id);
+      final url = res.data is Map ? '${res.data['joinUrl'] ?? ''}' : '';
+      if (url.isEmpty) throw StateError('The video room isn’t ready yet.');
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        AppPageRoute(
+          builder: (_) => AppWebView(
+            url: url,
+            title: 'Video · ${patientName(_appointment)}',
+          ),
+        ),
+      );
+      try {
+        await _api.leaveConsultation(_id);
+      } catch (_) {}
+      await _load(quiet: true);
+    } catch (e) {
+      _toast(
+        e is DioException
+            ? doctorErrorMessage(e)
+            : '$e'.replaceFirst('Bad state: ', ''),
+        error: true,
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+  Future<void> _save() => _run(() async {
+    final res = await _api.updateConsultationSummary(_id, _summary());
+    _merge(res.data);
+    _dirty = false;
+  }, 'Notes saved');
+
+  Future<void> _end() async {
+    if (_diagnoses.isEmpty) {
+      setState(() => _diagnosisMissing = true);
+      _toast('Add at least one diagnosis before ending.', error: true);
+      return;
+    }
+    final ok = await AppModal.confirm(
+      context,
+      title: _isPhysio ? 'End session?' : 'End consultation?',
+      message:
+          'The visit is marked completed and these notes are locked. You can still write the prescription afterwards.',
+      confirmLabel: (_isPhysio ? 'End session' : 'End consultation'),
+      cancelLabel: 'Keep working',
+      destructive: false,
+    );
+    if (!ok) return;
+    await _run(() async {
+      final res = await _api.endConsultation(_id, _summary());
+      _merge(res.data, hydrate: true);
+      _ended = true;
+    }, 'Consultation completed');
+  }
+
+  Future<void> _openPrescription() async {
+    if (_isPhysio) {
+      final p = apptPatient(_appointment);
+      await Navigator.of(context).push<bool>(
+        AppPageRoute(
+          builder: (_) => PhysioExercisePlanEditor(
+            patientId: '${p['_id'] ?? ''}',
+            patientName: patientName(_appointment),
+            appointmentId: _id,
+          ),
+        ),
+      );
+      return;
+    }
+    final rx = _prescription;
+    if (rx != null) {
+      await Navigator.of(context).push(
+        AppPageRoute(
+          builder: (_) => PrescriptionDetailsScreen(prescription: rx),
+        ),
+      );
+    } else {
+      final p = apptPatient(_appointment);
+      await Navigator.of(context).push<bool>(
+        AppPageRoute(
+          builder: (_) => CreatePrescriptionScreen(
+            initialPatientId: p['_id']?.toString(),
+            initialPatientName: patientName(_appointment),
+            initialAppointmentId: _id,
+          ),
+        ),
       );
     }
-
-    final session = _session ?? const <String, dynamic>{};
-    final patient = _patient;
-    final status = session['status']?.toString() ?? 'scheduled';
-    final canStart = session['canStart'] == true;
-    final canJoin = session['canJoin'] == true;
-    final canEnd = session['canEnd'] == true;
-    final paymentRequired = session['paymentRequired'] == true;
-    final isEnded = status == 'ended' || _appointment?['status'] == 'completed';
-
-    return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        title: Text(
-          'Consultation',
-          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-        ),
-        backgroundColor: Colors.white,
-        foregroundColor: AppTheme.textPrimary,
-        elevation: 0,
-        actions: [
-          IconButton(
-            onPressed: _busy ? null : () => _load(),
-            icon: const Icon(CupertinoIcons.refresh),
-          ),
-        ],
-      ),
-      body: _error != null
-          ? _errorState()
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _headerCard(patient, status, paymentRequired),
-                  const SizedBox(height: 16),
-                  _lifecycleCard(
-                    status: status,
-                    canStart: canStart,
-                    canJoin: canJoin,
-                    canEnd: canEnd,
-                    isEnded: isEnded,
-                  ),
-                  const SizedBox(height: 16),
-                  _clinicalCard(isEnded),
-                  const SizedBox(height: 16),
-                  _prescriptionCard(isEnded),
-                  const SizedBox(height: 28),
-                ],
-              ),
-            ),
-    );
+    await _loadPrescription();
+    if (mounted) setState(() {});
   }
 
-  Widget _headerCard(
-    Map<String, dynamic> patient,
-    String status,
-    bool paymentRequired,
-  ) {
-    final name = patient['name']?.toString() ?? 'Patient';
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                foregroundColor: AppTheme.primary,
-                child: Text(name.isEmpty ? 'P' : name[0].toUpperCase()),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name, style: _titleStyle()),
-                    Text(
-                      '${_appointment?['type'] ?? 'clinic'} consultation • ${_appointment?['startTime'] ?? ''}',
-                      style: _subStyle(),
-                    ),
-                  ],
-                ),
-              ),
-              _statusChip(status),
-            ],
-          ),
-          if (paymentRequired) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.warning.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'The patient must complete payment before this video consultation can start.',
-                style: GoogleFonts.manrope(
-                  fontSize: 12,
-                  color: AppTheme.warning,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _lifecycleCard({
-    required String status,
-    required bool canStart,
-    required bool canJoin,
-    required bool canEnd,
-    required bool isEnded,
-  }) {
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Consultation controls', style: _sectionStyle()),
-          const SizedBox(height: 12),
-          if (isEnded)
-            const _InfoBanner(
-              icon: CupertinoIcons.checkmark_circle,
-              text:
-                  'This consultation is completed. Clinical notes are locked.',
-              color: AppTheme.success,
-            )
-          else ...[
-            if (canStart)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _busy ? null : _start,
-                  icon: const Icon(CupertinoIcons.play, size: 18),
-                  label: const Text('Start consultation'),
-                ),
-              ),
-            if (_isVideo) ...[
-              if (canStart) const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: !_busy && canJoin ? _joinVideo : null,
-                  icon: const Icon(CupertinoIcons.video_camera, size: 18),
-                  label: Text(
-                    canJoin ? 'Join secure video room' : 'Video room not ready',
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text('Status: ${status.replaceAll('_', ' ')}', style: _subStyle()),
-            if (canEnd) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : _endConsultation,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.error,
-                  ),
-                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                  label: const Text('End & complete consultation'),
-                ),
-              ),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _clinicalCard(bool isEnded) {
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Clinical summary', style: _sectionStyle()),
-          const SizedBox(height: 12),
-          _field(
-            _chiefComplaintController,
-            'Chief complaint',
-            'Comma-separated complaints',
-            enabled: !isEnded,
-          ),
-          _field(
-            _diagnosisController,
-            'Diagnosis',
-            'Comma-separated diagnoses',
-            enabled: !isEnded,
-          ),
-          _field(
-            _notesController,
-            'Clinical notes',
-            'Examination/findings/notes',
-            enabled: !isEnded,
-            maxLines: 4,
-          ),
-          _field(
-            _adviceController,
-            'Advice',
-            'Care advice and precautions',
-            enabled: !isEnded,
-            maxLines: 3,
-          ),
-          DropdownButtonFormField<String>(
-            value: _outcome,
-            decoration: const InputDecoration(labelText: 'Outcome'),
-            items:
-                const [
-                      'unknown',
-                      'resolved',
-                      'improved',
-                      'ongoing',
-                      'referred',
-                      'emergency_referral',
-                    ]
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Text(value.replaceAll('_', ' ')),
-                      ),
-                    )
-                    .toList(),
-            onChanged: isEnded
-                ? null
-                : (value) => setState(() => _outcome = value ?? 'unknown'),
-          ),
-          const SizedBox(height: 10),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _followUpRequired,
-            onChanged: isEnded
-                ? null
-                : (value) => setState(() => _followUpRequired = value),
-            title: const Text('Follow-up required'),
-          ),
-          if (_followUpRequired) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Follow-up date'),
-              subtitle: Text(
-                _followUpDate == null
-                    ? 'Not selected'
-                    : '${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year}',
-              ),
-              trailing: const Icon(CupertinoIcons.calendar),
-              onTap: isEnded ? null : _pickFollowUpDate,
-            ),
-            _field(
-              _followUpNotesController,
-              'Follow-up instructions',
-              'What should happen at follow-up?',
-              enabled: !isEnded,
-              maxLines: 2,
-            ),
-          ],
-          if (!isEnded)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : _saveNotes,
-                icon: const Icon(Icons.save_outlined, size: 18),
-                label: const Text('Save clinical notes'),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _prescriptionCard(bool isEnded) {
-    final rx = _prescription;
-    final status = rx?['status']?.toString() ?? '';
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Prescription / therapy plan',
-                  style: _sectionStyle(),
-                ),
-              ),
-              if (rx != null) _statusChip(status),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (rx == null)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _busy ? null : _openPrescriptionEditor,
-                icon: const Icon(CupertinoIcons.doc_text, size: 18),
-                label: const Text('Create prescription'),
-              ),
-            )
-          else ...[
-            Text(
-              rx['prescriptionNumber']?.toString() ?? 'Prescription',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            Text(_listText(rx['diagnosis']), style: _subStyle()),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            PrescriptionDetailsScreen(prescription: rx),
-                      ),
-                    ),
-                    icon: const Icon(CupertinoIcons.eye, size: 16),
-                    label: const Text('View'),
-                  ),
-                ),
-                if (status == 'draft') ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _busy ? null : _issuePrescription,
-                      icon: const Icon(CupertinoIcons.paperplane, size: 16),
-                      label: const Text('Issue'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          if (isEnded && rx == null) ...[
-            const SizedBox(height: 10),
-            Text(
-              'You can still create an appointment-linked prescription after completing the consultation.',
-              style: _subStyle(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _card({required Widget child}) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: AppTheme.border),
-    ),
-    child: child,
-  );
-
-  Widget _field(
-    TextEditingController controller,
-    String label,
-    String hint, {
-    bool enabled = true,
-    int maxLines = 1,
-  }) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: TextField(
-      controller: controller,
-      enabled: enabled,
-      maxLines: maxLines,
-      decoration: InputDecoration(labelText: label, hintText: hint),
-    ),
-  );
-
-  Widget _statusChip(String status) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-    decoration: BoxDecoration(
-      color: AppTheme.primary.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Text(
-      status.replaceAll('_', ' ').toUpperCase(),
-      style: GoogleFonts.manrope(
-        fontSize: 10,
-        fontWeight: FontWeight.w700,
-        color: AppTheme.primary,
-      ),
-    ),
-  );
-
-  TextStyle _titleStyle() => GoogleFonts.manrope(
-    fontSize: 15,
-    fontWeight: FontWeight.w700,
-    color: AppTheme.textPrimary,
-  );
-
-  TextStyle _sectionStyle() => GoogleFonts.manrope(
-    fontSize: 15,
-    fontWeight: FontWeight.w700,
-    color: AppTheme.textPrimary,
-  );
-
-  TextStyle _subStyle() =>
-      GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary);
-
-  Future<void> _pickFollowUpDate() async {
+  Future<void> _pickFollowUp() async {
+    final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDate: _followUpDate ?? DateTime.now().add(const Duration(days: 7)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      initialDate: _followUpDate ?? now.add(const Duration(days: 7)),
+      helpText: 'Follow-up date',
     );
-    if (picked != null && mounted) setState(() => _followUpDate = picked);
+    if (picked != null && mounted) {
+      setState(() {
+        _followUpDate = picked;
+        _dirty = true;
+      });
+    }
   }
 
-  Widget _errorState() => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            CupertinoIcons.exclamationmark_triangle,
-            color: AppTheme.error,
-            size: 42,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _error ?? 'Unable to load consultation',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: _load, child: const Text('Retry')),
-        ],
-      ),
-    ),
-  );
-
-  void _show(String text, {bool error = false}) {
+  void _toast(String text, {bool error = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(text),
-        backgroundColor: error ? AppTheme.error : AppTheme.success,
+        content: Text(
+          text,
+          style: AppType.sans(fontSize: AppType.caption, color: Colors.white),
+        ),
+        backgroundColor: error ? AppColors.error : AppColors.textStrong,
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  String _message(DioException e) {
-    final data = e.response?.data;
-    if (data is Map) {
-      return (data['error'] ?? data['message'] ?? 'Request failed').toString();
+  // ─────────────────────────── State of the session ───────────────────────
+
+  String get _status => '${_session?['status'] ?? 'scheduled'}';
+  bool get _isEnded =>
+      _ended || _status == 'ended' || apptStatus(_appointment) == 'completed';
+  bool get _canStart => _session?['canStart'] == true;
+  bool get _canJoin => _session?['canJoin'] == true;
+  bool get _canEnd => _session?['canEnd'] == true;
+  bool get _paymentRequired => _session?['paymentRequired'] == true;
+
+  /// One line saying where things stand and why the button is (or isn't)
+  /// there — "Status: scheduled" used to leave doctors guessing.
+  ({String title, String detail, IconData icon, Color color}) _stage() {
+    final accent = ModuleAccent.of(context).color;
+    if (_isEnded) {
+      return (
+        title: 'Consultation completed',
+        detail: 'Notes are locked. Write or review the prescription below.',
+        icon: LucideIcons.circleCheckBig,
+        color: accent,
+      );
     }
-    return e.message ?? 'Request failed';
+    if (_status == 'cancelled' || _status == 'no_show') {
+      return (
+        title: _status == 'no_show' ? 'Marked as no-show' : 'Cancelled',
+        detail: 'This visit can’t be started.',
+        icon: LucideIcons.ban,
+        color: AppColors.error,
+      );
+    }
+    if (_status == 'in_progress' || _status == 'professional_ready') {
+      return (
+        title: 'In consultation',
+        detail: _isVideo
+            ? 'Rejoin the video room any time. End when you’re done.'
+            : 'Write your notes, then end the consultation.',
+        icon: LucideIcons.activity,
+        color: accent,
+      );
+    }
+    if (_paymentRequired) {
+      return (
+        title: 'Waiting for payment',
+        detail: 'The patient has to pay before a video consultation can start.',
+        icon: LucideIcons.wallet,
+        color: AppColors.warning,
+      );
+    }
+    if (_status == 'patient_waiting') {
+      return (
+        title: 'Patient is waiting',
+        detail: 'Start the consultation when you’re ready.',
+        icon: LucideIcons.userCheck,
+        color: AppColors.warning,
+      );
+    }
+    final start = apptStart(_appointment);
+    if (!_canStart && start != null && DateTime.now().isBefore(start)) {
+      final opens = start.subtract(const Duration(minutes: 15));
+      return (
+        title: 'Scheduled · ${dayLabel(start)} ${timeLabel(start)}',
+        detail: 'You can start from ${timeLabel(opens)}, 15 minutes before.',
+        icon: LucideIcons.clock,
+        color: AppColors.textSecondary,
+      );
+    }
+    return (
+      title: 'Ready to start',
+      detail: _isVideo
+          ? 'Start, then join the video room.'
+          : 'Start when the patient is with you.',
+      icon: LucideIcons.playCircle,
+      color: accent,
+    );
   }
 
-  List<String> _csv(String value) => value
-      .split(',')
-      .map((item) => item.trim())
-      .where((item) => item.isNotEmpty)
-      .toList();
-
-  String _listText(dynamic value) {
-    if (value is List) return value.map((item) => item.toString()).join(', ');
-    return value?.toString() ?? '';
-  }
-}
-
-class _InfoBanner extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  const _InfoBanner({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
+  // ─────────────────────────── Build ───────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.of(context).pop(_isEnded);
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        appBar: AppBar(
+          backgroundColor: AppColors.bg,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          iconTheme: const IconThemeData(color: AppColors.textPrimary),
+          titleSpacing: 0,
+          title: Text(
+            _isPhysio ? 'Session' : 'Consultation',
+            style: AppType.sans(
+              fontSize: AppType.title,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _busy ? null : () => _load(quiet: true),
+              icon: const Icon(LucideIcons.rotateCw, size: 19),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: _loading
+              ? ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: const [AppDetailSkeleton(rows: 6)],
+                )
+              : _error != null
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: AppErrorBanner(message: _error!, onRetry: _load),
+                )
+              : Column(
+                  children: [
+                    Expanded(child: _content()),
+                    _actionBar(),
+                  ],
+                ),
+        ),
       ),
-      child: Row(
+    );
+  }
+
+  Widget _content() {
+    final stage = _stage();
+    final p = apptPatient(_appointment);
+    final locked = _isEnded;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+      children: [
+        Row(
+          children: [
+            DoctorAvatar(name: patientName(_appointment), size: 44),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    patientName(_appointment),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.sans(
+                      fontSize: AppType.heading,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textStrong,
+                    ),
+                  ),
+                  Text(
+                    [
+                      apptTypeInfo(apptType(_appointment)).label,
+                      timeLabel(apptStart(_appointment)),
+                      if (p['age'] != null) '${p['age']} yrs',
+                      if ('${p['gender'] ?? ''}'.isNotEmpty)
+                        capitalised('${p['gender']}'),
+                    ].join(' · '),
+                    style: AppType.sans(
+                      fontSize: AppType.caption,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        AnimatedSwitcher(
+          duration: AppMotion.medium,
+          child: Container(
+            key: ValueKey(stage.title),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.panel,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(stage.icon, size: 18, color: stage.color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        stage.title,
+                        style: AppType.sans(
+                          fontSize: AppType.body,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textStrong,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        stage.detail,
+                        style: AppType.sans(
+                          fontSize: AppType.small,
+                          height: 1.4,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        AppSectionTitle(locked ? 'Clinical notes · locked' : 'Clinical notes'),
+        _ChipsInput(
+          label: 'Chief complaints',
+          hint: 'e.g. Fever, Cough — press enter after each',
+          values: _complaints,
+          enabled: !locked,
+          onChanged: (v) => setState(() {
+            _complaints = v;
+            _dirty = true;
+          }),
+        ),
+        const SizedBox(height: 14),
+        _ChipsInput(
+          label: 'Diagnosis *',
+          hint: 'e.g. Acute pharyngitis',
+          values: _diagnoses,
+          enabled: !locked,
+          error: _diagnosisMissing && _diagnoses.isEmpty
+              ? 'Add at least one diagnosis to end the consultation'
+              : null,
+          onChanged: (v) => setState(() {
+            _diagnoses = v;
+            _dirty = true;
+          }),
+        ),
+        const SizedBox(height: 14),
+        AppTextField(
+          label: 'Examination & notes',
+          controller: _notes,
+          hint: 'Findings, vitals, observations',
+          maxLines: 4,
+          readOnly: locked,
+          textCapitalization: TextCapitalization.sentences,
+          margin: const EdgeInsets.only(bottom: 14),
+        ),
+        AppTextField(
+          label: 'Advice for the patient',
+          controller: _advice,
+          hint: 'Rest, diet, precautions',
+          maxLines: 3,
+          readOnly: locked,
+          textCapitalization: TextCapitalization.sentences,
+          margin: const EdgeInsets.only(bottom: 14),
+        ),
+        Text(
+          'Outcome',
+          style: AppType.sans(
+            fontSize: AppType.caption,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 7,
+          runSpacing: 7,
+          children: [
+            for (final e in _outcomes.entries)
+              AppFilterChip(
+                label: e.value,
+                selected: _outcome == e.key,
+                onTap: locked
+                    ? () {}
+                    : () => setState(() {
+                        _outcome = _outcome == e.key ? 'unknown' : e.key;
+                        _dirty = true;
+                      }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        AppGroup(
+          children: [
+            AppSwitchRow(
+              label: 'Follow-up needed',
+              subtitle: _followUpRequired && _followUpDate != null
+                  ? 'On ${DateFormat('EEE d MMM').format(_followUpDate!)}'
+                  : 'Ask the patient to come back',
+              value: _followUpRequired,
+              enabled: !locked,
+              onChanged: (v) => setState(() {
+                _followUpRequired = v;
+                _dirty = true;
+              }),
+            ),
+          ],
+        ),
+        if (_followUpRequired) ...[
+          const SizedBox(height: 12),
+          AppPickerField(
+            label: 'Follow-up date',
+            valueText: _followUpDate == null
+                ? 'Select date'
+                : DateFormat('EEE d MMM yyyy').format(_followUpDate!),
+            onTap: locked ? () {} : _pickFollowUp,
+            margin: const EdgeInsets.only(bottom: 12),
+          ),
+          AppTextField(
+            label: 'Follow-up instructions',
+            controller: _followUpNotes,
+            hint: 'What to bring or check next time',
+            maxLines: 2,
+            readOnly: locked,
+            margin: EdgeInsets.zero,
+          ),
+        ],
+        const SizedBox(height: 22),
+        AppSectionTitle(_isPhysio ? 'Home programme' : 'Prescription'),
+        AppGroup(
+          children: [
+            InkWell(
+              onTap: _busy ? null : _openPrescription,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      _prescription == null
+                          ? LucideIcons.filePlus2
+                          : LucideIcons.fileText,
+                      size: 17,
+                      color: ModuleAccent.of(context).color,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _isPhysio
+                                ? 'Assign exercises'
+                                : _prescription == null
+                                ? 'Write prescription'
+                                : '${_prescription!['prescriptionNumber'] ?? 'Prescription'}',
+                            style: AppType.sans(
+                              fontSize: AppType.body,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            _isPhysio
+                                ? 'Sets, reps and hold for practice at home'
+                                : _prescription == null
+                                ? 'Medicines, tests and advice for this visit'
+                                : '${_prescription!['status'] == 'draft' ? 'Draft — not sent yet' : 'Sent to patient'} · ${(_prescription!['medicines'] is List) ? (_prescription!['medicines'] as List).length : 0} medicines',
+                            style: AppType.sans(
+                              fontSize: AppType.caption,
+                              color: _prescription?['status'] == 'draft'
+                                  ? AppColors.warning
+                                  : AppColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      LucideIcons.chevronRight,
+                      size: 16,
+                      color: AppColors.textDisabled,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _actionBar() {
+    Widget bar(Widget child) => Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: child,
+    );
+
+    if (_isEnded) {
+      return bar(
+        AppButton(
+          label: _isPhysio
+              ? 'Assign exercises'
+              : _prescription == null
+              ? 'Write prescription'
+              : 'View prescription',
+          icon: LucideIcons.fileText,
+          onPressed: _busy ? null : _openPrescription,
+        ),
+      );
+    }
+
+    final save = AppSecondaryButton(
+      label: _dirty ? 'Save notes' : 'Saved',
+      icon: LucideIcons.save,
+      onPressed: _busy || !_dirty ? null : _save,
+    );
+
+    if (_canEnd || _canJoin) {
+      return bar(
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_isVideo && _canJoin) ...[
+              AppButton(
+                label: 'Join video room',
+                icon: LucideIcons.video,
+                loading: _busy,
+                onPressed: _busy ? null : _joinVideo,
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                Expanded(child: save),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _isVideo && _canJoin
+                      ? AppSecondaryButton(
+                          label: (_isPhysio
+                              ? 'End session'
+                              : 'End consultation'),
+                          color: AppColors.error,
+                          onPressed: _busy || !_canEnd ? null : _end,
+                        )
+                      : AppButton(
+                          label: (_isPhysio
+                              ? 'End session'
+                              : 'End consultation'),
+                          icon: LucideIcons.circleCheckBig,
+                          loading: _busy,
+                          onPressed: _busy || !_canEnd ? null : _end,
+                        ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return bar(
+      Row(
         children: [
-          Icon(icon, color: color, size: 18),
+          Expanded(child: save),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              text,
-              style: GoogleFonts.manrope(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
+            flex: 2,
+            child: AppButton(
+              label: 'Start consultation',
+              icon: LucideIcons.play,
+              loading: _busy,
+              onPressed: _busy || !_canStart ? null : _start,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A list of short terms entered one at a time, shown as removable chips.
+/// Owns its text controller.
+class _ChipsInput extends StatefulWidget {
+  final String label;
+  final String hint;
+  final List<String> values;
+  final bool enabled;
+  final String? error;
+  final ValueChanged<List<String>> onChanged;
+  const _ChipsInput({
+    required this.label,
+    required this.hint,
+    required this.values,
+    required this.onChanged,
+    this.enabled = true,
+    this.error,
+  });
+
+  @override
+  State<_ChipsInput> createState() => _ChipsInputState();
+}
+
+class _ChipsInputState extends State<_ChipsInput> {
+  final _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    final parts = _text.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty && !widget.values.contains(e));
+    if (parts.isEmpty) return;
+    widget.onChanged([...widget.values, ...parts]);
+    _text.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: AppType.sans(
+            fontSize: AppType.caption,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        if (widget.values.isNotEmpty) ...[
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final v in widget.values)
+                Container(
+                  padding: EdgeInsets.fromLTRB(
+                    10,
+                    6,
+                    widget.enabled ? 4 : 10,
+                    6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: accent.veryLight,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        v,
+                        style: AppType.sans(
+                          fontSize: AppType.small,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textStrong,
+                        ),
+                      ),
+                      if (widget.enabled)
+                        InkResponse(
+                          radius: 14,
+                          onTap: () => widget.onChanged(
+                            widget.values.where((e) => e != v).toList(),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(
+                              LucideIcons.x,
+                              size: 13,
+                              color: accent.color,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (widget.enabled)
+          AppTextField(
+            label: '',
+            controller: _text,
+            hint: widget.hint,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _add(),
+            errorText: widget.error,
+            margin: EdgeInsets.zero,
+            trailing: IconButton(
+              tooltip: 'Add',
+              icon: Icon(LucideIcons.plus, size: 18, color: accent.color),
+              onPressed: _add,
+            ),
+          )
+        else if (widget.values.isEmpty)
+          Text(
+            '—',
+            style: AppType.sans(
+              fontSize: AppType.body,
+              color: AppColors.textTertiary,
+            ),
+          ),
+      ],
     );
   }
 }

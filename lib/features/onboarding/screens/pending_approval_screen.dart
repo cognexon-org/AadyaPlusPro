@@ -17,7 +17,8 @@ class PendingApprovalScreen extends ConsumerStatefulWidget {
   const PendingApprovalScreen({super.key});
 
   @override
-  ConsumerState<PendingApprovalScreen> createState() => _PendingApprovalScreenState();
+  ConsumerState<PendingApprovalScreen> createState() =>
+      _PendingApprovalScreenState();
 }
 
 class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
@@ -27,7 +28,10 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
   @override
   void initState() {
     super.initState();
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _checkStatus());
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _checkStatus(),
+    );
   }
 
   @override
@@ -51,7 +55,11 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
     if (showFeedback) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok ? 'Still incomplete — please finish registration.' : 'Could not check status. Check your connection.'),
+          content: Text(
+            ok
+                ? 'Still incomplete — please finish registration.'
+                : 'Could not check status. Check your connection.',
+          ),
         ),
       );
     }
@@ -77,10 +85,7 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
                 duration: const Duration(milliseconds: 800),
                 curve: Curves.elasticOut,
                 builder: (context, value, child) {
-                  return Transform.scale(
-                    scale: value,
-                    child: child,
-                  );
+                  return Transform.scale(scale: value, child: child);
                 },
                 child: Container(
                   width: 120,
@@ -146,11 +151,17 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
                 decoration: BoxDecoration(
                   color: AppTheme.info.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.info.withValues(alpha: 0.15)),
+                  border: Border.all(
+                    color: AppTheme.info.withValues(alpha: 0.15),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(CupertinoIcons.info_circle, size: 20, color: AppTheme.info),
+                    const Icon(
+                      CupertinoIcons.info_circle,
+                      size: 20,
+                      color: AppTheme.info,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -171,17 +182,25 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _checking ? null : () => _checkStatus(showFeedback: true),
+                  onPressed: _checking
+                      ? null
+                      : () => _checkStatus(showFeedback: true),
                   icon: _checking
                       ? const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.refresh, size: 18),
                   label: Text(
                     _checking ? 'Checking...' : 'Check Again',
-                    style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -190,11 +209,16 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
                 width: double.infinity,
                 child: OutlinedButton(
                   onPressed: () {
-                    Navigator.of(context).pushNamedAndRemoveUntil('/register', (r) => false);
+                    Navigator.of(
+                      context,
+                    ).pushNamedAndRemoveUntil('/register', (r) => false);
                   },
                   child: Text(
                     'Resume Registration',
-                    style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -204,7 +228,9 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
               TextButton.icon(
                 onPressed: () {
                   ref.read(authProvider.notifier).logout();
-                  Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
+                  Navigator.of(
+                    context,
+                  ).pushNamedAndRemoveUntil('/login', (r) => false);
                 },
                 icon: const Icon(Icons.logout_outlined, size: 18),
                 label: Text(
@@ -214,7 +240,9 @@ class _PendingApprovalScreenState extends ConsumerState<PendingApprovalScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                style: TextButton.styleFrom(foregroundColor: AppTheme.textSecondary),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 16),
             ],

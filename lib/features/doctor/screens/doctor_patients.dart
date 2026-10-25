@@ -1,11 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/network/api_service.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../../shared/ui/app_ui.dart';
+import '../providers/doctor_patients_provider.dart';
+import '../widgets/patient_summary.dart';
 import 'patient_history.dart';
 
+enum _Sort { recent, name, visits }
+
+/// Everyone the doctor has seen or will see, built from their appointments
+/// (the server has no "my patients" endpoint). Loads the full history — not
+/// the dashboard's ±60-day window — so older patients appear too.
 class DoctorPatients extends ConsumerStatefulWidget {
   const DoctorPatients({super.key});
 
@@ -14,179 +22,166 @@ class DoctorPatients extends ConsumerStatefulWidget {
 }
 
 class _DoctorPatientsState extends ConsumerState<DoctorPatients> {
-  List<Map<String, dynamic>> _patients = [];
-  bool _isLoading = true;
-  String? _error;
+  final _search = TextEditingController();
+  Timer? _debounce;
+  String _query = '';
+  _Sort _sort = _Sort.recent;
 
   @override
   void initState() {
     super.initState();
-    _loadPatients();
+    // Reload on every visit, as before; silently once a list is on screen.
+    Future.microtask(() {
+      if (!mounted) return;
+      final hasLoaded = ref.read(doctorPatientsProvider).hasLoaded;
+      ref.read(doctorPatientsProvider.notifier).load(silent: hasLoaded);
+    });
   }
 
-  Future<void> _loadPatients() async {
-    setState(() { _isLoading = true; _error = null; });
-    try {
-      // Doctor patients come from appointments - extract unique patients
-      final response = await ApiService().getDoctorAppointments();
-      final data = response.data;
-      final appointments = _extractList(data);
-
-      // Group by patient to get unique patients
-      final Map<String, Map<String, dynamic>> patientMap = {};
-      for (final apt in appointments) {
-        final patientId = apt['patientId'];
-        final id = patientId is Map ? (patientId['_id'] ?? '') : (patientId?.toString() ?? '');
-        if (id.isEmpty) continue;
-
-        if (!patientMap.containsKey(id)) {
-          patientMap[id] = {
-            'id': id,
-            'name': patientId is Map ? (patientId['name'] ?? 'Patient') : 'Patient',
-            'phone': patientId is Map ? (patientId['phone'] ?? '') : '',
-            'email': patientId is Map ? (patientId['email'] ?? '') : '',
-            'visits': 1,
-            'lastVisit': apt['appointmentDate'] ?? '',
-          };
-        } else {
-          patientMap[id]!['visits'] = (patientMap[id]!['visits'] as int) + 1;
-        }
-      }
-
-      setState(() {
-        _patients = patientMap.values.toList();
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() { _isLoading = false; _error = e.toString(); });
-    }
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
+    super.dispose();
   }
 
-  List<Map<String, dynamic>> _extractList(dynamic data) {
-    if (data == null) return [];
-    if (data is List) return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    if (data is Map) {
-      for (final key in ['data', 'appointments', 'patients']) {
-        if (data[key] is List) return (data[key] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      }
+  Future<void> _load() => ref.read(doctorPatientsProvider.notifier).load();
+
+  void _onSearch(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _query = value.trim().toLowerCase());
+    });
+  }
+
+  List<PatientSummary> _visible(List<PatientSummary> patients) {
+    final q = _query;
+    final digits = q.replaceAll(RegExp(r'\D'), '');
+    final list = patients.where((p) {
+      if (q.isEmpty) return true;
+      if (p.name.toLowerCase().contains(q)) return true;
+      return digits.isNotEmpty &&
+          p.phone.replaceAll(RegExp(r'\D'), '').contains(digits);
+    }).toList();
+    final epoch = DateTime(1970);
+    switch (_sort) {
+      case _Sort.recent:
+        list.sort(
+          (a, b) => (b.lastSeen ?? epoch).compareTo(a.lastSeen ?? epoch),
+        );
+      case _Sort.name:
+        list.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+      case _Sort.visits:
+        list.sort((a, b) {
+          final c = b.visits.compareTo(a.visits);
+          return c != 0
+              ? c
+              : (b.lastSeen ?? epoch).compareTo(a.lastSeen ?? epoch);
+        });
     }
-    return [];
+    return list;
+  }
+
+  void _open(PatientSummary p) {
+    Navigator.of(context).push(
+      AppPageRoute(
+        builder: (_) => PatientHistoryScreen(
+          patientId: p.id,
+          patientName: p.name,
+          patient: p.patient,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context).color;
+    final st = ref.watch(doctorPatientsProvider);
+    final visible = _visible(st.patients);
+    final count = st.patients.length;
+
     return Scaffold(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: RefreshIndicator(
+          color: accent,
+          onRefresh: _load,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            children: [
+              AppScreenHeader(
+                title: 'Patients',
+                subtitle: !st.hasLoaded
+                    ? 'Everyone you’ve seen'
+                    : count == 1
+                    ? '1 patient'
+                    : '$count patients',
+              ),
+              const SizedBox(height: 16),
+              AppSearchField(
+                controller: _search,
+                hint: 'Search by name or phone',
+                onChanged: _onSearch,
+              ),
+              const SizedBox(height: 12),
+              Row(
                 children: [
-                  Text('Patients', style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-                  const SizedBox(height: 4),
-                  Text('${_patients.length} patients', style: GoogleFonts.manrope(fontSize: 13, color: AppTheme.textSecondary)),
+                  for (final s in _Sort.values) ...[
+                    AppFilterChip(
+                      label: switch (s) {
+                        _Sort.recent => 'Recent',
+                        _Sort.name => 'A–Z',
+                        _Sort.visits => 'Most visits',
+                      },
+                      selected: _sort == s,
+                      onTap: () => setState(() => _sort = s),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: 'Search patients...', prefixIcon: const Padding(padding: EdgeInsets.symmetric(horizontal: 14), child: Icon(CupertinoIcons.search, size: 18, color: AppTheme.textTertiary)),
-                  filled: true, fillColor: Colors.white,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.border)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.border)),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-                  : RefreshIndicator(
-                      onRefresh: _loadPatients,
-                      child: _patients.isEmpty
-                          ? ListView(children: [
-                              const SizedBox(height: 80),
-                              Center(child: Column(children: [
-                                Icon(CupertinoIcons.person_2, size: 48, color: AppTheme.textTertiary.withValues(alpha: 0.5)),
-                                const SizedBox(height: 12),
-                                Text(_error ?? 'No patients yet', style: GoogleFonts.manrope(fontSize: 14, color: AppTheme.textSecondary)),
-                              ])),
-                            ])
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
-                              itemCount: _patients.length,
-                              itemBuilder: (context, i) {
-                                final p = _patients[i];
-                                return GestureDetector(
-                                  onTap: () {
-                                    final patientId = p['id']?.toString() ?? '';
-                                    if (patientId.isNotEmpty) {
-                                      Navigator.of(context).push(MaterialPageRoute(
-                                        builder: (_) => PatientHistoryScreen(
-                                          patientId: patientId,
-                                          patientName: p['name'] ?? 'Patient',
-                                        ),
-                                      ));
-                                    }
-                                  },
-                                  child: Container(
-                                    margin: const EdgeInsets.only(bottom: 10),
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 44, height: 44,
-                                          decoration: BoxDecoration(gradient: AppTheme.doctorGradient, borderRadius: BorderRadius.circular(12)),
-                                          child: Center(child: Text((p['name'] ?? 'P')[0], style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(p['name'] ?? 'Patient', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                                              const SizedBox(height: 2),
-                                              Text(p['phone'] ?? '', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  const Icon(CupertinoIcons.chart_bar_square, size: 12, color: AppTheme.textTertiary),
-                                                  const SizedBox(width: 4),
-                                                  Text('${p['visits']} visits', style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          decoration: BoxDecoration(border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)), borderRadius: BorderRadius.circular(8)),
-                                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                            const Icon(CupertinoIcons.chevron_right, size: 14, color: AppTheme.primary),
-                                            const SizedBox(width: 4),
-                                            Text('History', style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primary)),
-                                          ]),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              ..._body(st, visible),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  List<Widget> _body(DoctorPatientsState st, List<PatientSummary> visible) {
+    final error = st.error;
+    if (error != null && !st.hasLoaded) {
+      return [AppErrorBanner(message: error, onRetry: _load)];
+    }
+    if (!st.hasLoaded) return const [AppListSkeleton(count: 6)];
+    return [
+      if (error != null) ...[
+        AppErrorBanner(message: error, onRetry: _load),
+        const SizedBox(height: 12),
+      ],
+      if (visible.isEmpty)
+        AppEmptyState(
+          icon: _query.isEmpty ? LucideIcons.users : LucideIcons.searchX,
+          text: _query.isEmpty
+              ? 'Patients appear here after their first booking.'
+              : 'No patient matches “${_search.text.trim()}”.',
+        )
+      else
+        AppEntrance(
+          child: AppGroup(
+            children: [
+              for (var i = 0; i < visible.length; i++) ...[
+                if (i > 0) const AppHairline(),
+                PatientRow(summary: visible[i], onTap: () => _open(visible[i])),
+              ],
+            ],
+          ),
+        ),
+    ];
   }
 }

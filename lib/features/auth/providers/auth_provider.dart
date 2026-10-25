@@ -14,11 +14,16 @@ class AuthState {
   final bool isAuthenticated;
   final String? error;
 
+  /// A calm, non-error message for the sign-in screen — e.g. the session
+  /// ended. Shown once, then cleared.
+  final String? notice;
+
   const AuthState({
     this.user,
     this.isLoading = false,
     this.isAuthenticated = false,
     this.error,
+    this.notice,
   });
 
   AuthState copyWith({
@@ -26,12 +31,14 @@ class AuthState {
     bool? isLoading,
     bool? isAuthenticated,
     String? error,
+    String? notice,
   }) {
     return AuthState(
       user: user ?? this.user,
       isLoading: isLoading ?? this.isLoading,
       isAuthenticated: isAuthenticated ?? this.isAuthenticated,
       error: error,
+      notice: notice,
     );
   }
 }
@@ -43,12 +50,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
     _api.setUnauthorizedHandler(_handleUnauthorized);
   }
 
+  /// The server refused a signed-in request: the session is over. Only
+  /// acts once — while already signed out there's nothing to end, so late
+  /// requests from screens closing down don't keep re-raising the notice.
   Future<void> _handleUnauthorized() async {
-    state = const AuthState(
-      isAuthenticated: false,
-      isLoading: false,
-      error: 'Your session expired. Please sign in again.',
-    );
+    if (!state.isAuthenticated) return;
+    state = const AuthState(notice: 'session_expired');
+  }
+
+  void clearNotice() {
+    if (state.notice != null) state = state.copyWith(error: state.error);
   }
 
   bool _isSupportedProfessionalRole(dynamic rawRole) {
@@ -67,7 +78,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final role = rawRole?.toString().toLowerCase() ?? '';
     if (role == 'patient')
       return 'Patient accounts must use the AadyaPlus patient app.';
-    return 'This account role is not supported by AadyaPlus Professional.';
+    return 'This account role is not supported by Aadya Plus Pro.';
   }
 
   Map<String, dynamic> _userPayload(dynamic responseData) {

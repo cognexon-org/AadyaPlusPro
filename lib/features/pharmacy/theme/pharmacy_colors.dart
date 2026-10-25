@@ -11,11 +11,20 @@ import 'package:flutter/material.dart';
 class PharmacyColors {
   PharmacyColors._();
 
-  // Primary — brand green + the emerald ramp the design uses around it.
+  // Primary — one brand green for the whole app. Fills, icons, text, charts
+  // and status all use it; the two tints below are that same green mixed
+  // with white, not separate swatches. (The module used to mix in Tailwind's
+  // bluer emerald for text and icons, which read as a second green.)
   static const Color green = Color(0xFF00A651);
-  static const Color greenDark = Color(0xFF059669); // emerald-600
-  static const Color greenLight = Color(0xFFD1FAE5); // emerald-100
-  static const Color greenVeryLight = Color(0xFFECFDF5); // emerald-50
+
+  /// Same as [green]. Kept as a name so existing call sites need no change.
+  static const Color greenDark = green;
+
+  /// [green] at 20% on white — badges, bars' tracks, selected surfaces.
+  static const Color greenLight = Color(0xFFCCEDDC);
+
+  /// [green] at 8% on white — tinted panels.
+  static const Color greenVeryLight = Color(0xFFEBF8F1);
 
   // Background — the design puts content on WHITE, with filled surfaces
   // (stat tiles, list rows) in slate-50. Note this is the inverse of the
@@ -25,14 +34,14 @@ class PharmacyColors {
   static const Color card = Color(0xFFF8FAFC); // slate-50
   static const Color cardElevated = Color(0xFFFFFFFF);
 
+  /// Minimal style's grouped-panel fill: content sits in soft grey panels on
+  /// a white page, with no border and no shadow.
+  static const Color panel = Color(0xFFF4F6F8);
+
   // Hero gradient — the brand green deepening diagonally. The Home hero is
   // the only surface that carries it; it is what gives the screen its single
   // dominant block instead of a page of equal-weight cards.
-  static const List<Color> heroGradient = [
-    Color(0xFF00A651),
-    Color(0xFF018A45),
-    Color(0xFF026B39),
-  ];
+  static const List<Color> heroGradient = [green, green];
 
   // Text — Tailwind slate ramp.
   static const Color textStrong = Color(0xFF0F172A); // slate-900, hero figures
@@ -49,7 +58,7 @@ class PharmacyColors {
   static const Color borderStrong = Color(0xFFE2E8F0); // slate-200
 
   // Semantic
-  static const Color success = Color(0xFF059669);
+  static const Color success = green;
   static const Color warning = Color(0xFFD97706);
   static const Color warningBg = Color(0xFFFEF3C7);
   static const Color error = Color(0xFFDC2626);
@@ -60,11 +69,11 @@ class PharmacyColors {
   /// The five-step green ramp the design uses to shade chart bars by
   /// magnitude (lightest = smallest value, brand green = largest).
   static const List<Color> barRamp = [
-    Color(0xFFA7F3D0), // emerald-200
-    Color(0xFF6EE7B7), // emerald-300
-    Color(0xFF34D399), // emerald-400
-    Color(0xFF10B981), // emerald-500
-    Color(0xFF00A651), // brand
+    Color(0xFFB2E4C9), // brand at 30%
+    Color(0xFF80D2A8), // brand at 50%
+    Color(0xFF4DC185), // brand at 70%
+    Color(0xFF26B36A), // brand at 85%
+    green,
   ];
 
   /// Picks a bar colour from [barRamp] for a value relative to the max.
@@ -79,8 +88,8 @@ class PharmacyColors {
   static const Color statusPrescriptionReviewFg = Color(0xFFB86600);
   static const Color statusPlacedBg = Color(0xFFEEF4FF);
   static const Color statusPlacedFg = Color(0xFF3978D8);
-  static const Color statusConfirmedBg = Color(0xFFE8F7F0);
-  static const Color statusConfirmedFg = Color(0xFF087A4C);
+  static const Color statusConfirmedBg = greenVeryLight;
+  static const Color statusConfirmedFg = green;
   static const Color statusPackingBg = Color(0xFFF2F3F5);
   static const Color statusPackingFg = Color(0xFF59625D);
   static const Color statusReadyToShipBg = Color(0xFFEEF4FF);
@@ -89,8 +98,8 @@ class PharmacyColors {
   static const Color statusShippedFg = Color(0xFF6651B8);
   static const Color statusOutForDeliveryBg = Color(0xFFFFF5E6);
   static const Color statusOutForDeliveryFg = Color(0xFFB86600);
-  static const Color statusDeliveredBg = Color(0xFFE8F7F0);
-  static const Color statusDeliveredFg = Color(0xFF087A4C);
+  static const Color statusDeliveredBg = greenVeryLight;
+  static const Color statusDeliveredFg = green;
   static const Color statusCancelledBg = Color(0xFFFFF0F0);
   static const Color statusCancelledFg = Color(0xFFC23B3B);
 
@@ -168,10 +177,10 @@ class PharmacyTileStyle {
   });
 
   static const emerald = PharmacyTileStyle(
-    surface: Color(0xFFECFDF5),
-    border: Color(0xFFD1FAE5),
-    disc: Color(0xFFD1FAE5),
-    icon: Color(0xFF059669),
+    surface: PharmacyColors.greenVeryLight,
+    border: PharmacyColors.greenLight,
+    disc: PharmacyColors.greenLight,
+    icon: PharmacyColors.green,
   );
   static const amber = PharmacyTileStyle(
     surface: Color(0xFFFFFBEB),

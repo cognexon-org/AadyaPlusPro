@@ -12,10 +12,41 @@ import 'professional_notification_navigation_service.dart';
 
 const AndroidNotificationChannel _aadyaProChannel = AndroidNotificationChannel(
   'aadya_pro_high_importance',
-  'Aadya Plus Professional alerts',
+  'Aadya Plus Pro alerts',
   description: 'Clinical, pharmacy, diagnostics and field-force alerts',
   importance: Importance.high,
 );
+
+/// New online orders for a pharmacy. Its own channel so it can be loud —
+/// maximum importance (heads-up over other apps) and the alarm audio stream,
+/// which plays at alarm volume rather than the often-muted notification
+/// volume. The backend targets it by id (`pharmacy_orders`) for both FCM and
+/// OneSignal, so the channel must exist before the first push arrives.
+const AndroidNotificationChannel pharmacyOrdersChannel =
+    AndroidNotificationChannel(
+      'pharmacy_orders',
+      'New orders',
+      description: 'Rings when a new online order arrives for your pharmacy',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+    );
+
+/// New appointment requests for a doctor or physiotherapist — loud for the
+/// same reason as [pharmacyOrdersChannel]: a request has to be answered, and
+/// one that sits unseen is declined automatically. The backend targets it by
+/// id (`appointment_requests`).
+const AndroidNotificationChannel appointmentRequestsChannel =
+    AndroidNotificationChannel(
+      'appointment_requests',
+      'New appointments',
+      description: 'Rings when a patient asks for an appointment',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+    );
 
 FirebaseOptions? _firebaseOptionsFromEnvironment() {
   const genericApiKey = String.fromEnvironment('AADYA_FIREBASE_API_KEY');
@@ -105,9 +136,18 @@ class ProfessionalPushNotificationService {
   StreamSubscription<RemoteMessage>? _foreground;
   StreamSubscription<RemoteMessage>? _opened;
 
+  /// The local-notification plugin, already initialised with the tap handler.
+  /// The pharmacy order ringer posts through it.
+  FlutterLocalNotificationsPlugin get localNotifications => _local;
+
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
+
+    // Channels and local notifications first, independent of Firebase: the
+    // OneSignal path needs the "New orders" channel to exist, and the in-app
+    // ringer needs the plugin, on installs where Firebase is not configured.
+    await _initializeLocal();
 
     try {
       await _ensureFirebaseInitialized();
@@ -115,37 +155,6 @@ class ProfessionalPushNotificationService {
         aadyaProFirebaseMessagingBackgroundHandler,
       );
       _available = true;
-
-      const settings = InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      );
-
-      await _local.initialize(
-        settings: settings,
-        onDidReceiveNotificationResponse: (response) {
-          final payload = response.payload;
-          if (payload == null || payload.isEmpty) return;
-          try {
-            final decoded = jsonDecode(payload);
-            if (decoded is Map) {
-              openNotificationData(Map<String, dynamic>.from(decoded));
-            }
-          } catch (error) {
-            debugPrint('Invalid Aadya Pro notification payload: $error');
-          }
-        },
-      );
-
-      await _local
-          .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin
-          >()
-          ?.createNotificationChannel(_aadyaProChannel);
 
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission(
@@ -201,6 +210,45 @@ class ProfessionalPushNotificationService {
     }
   }
 
+  Future<void> _initializeLocal() async {
+    try {
+      const settings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
+      );
+
+      await _local.initialize(
+        settings: settings,
+        onDidReceiveNotificationResponse: (response) {
+          final payload = response.payload;
+          if (payload == null || payload.isEmpty) return;
+          try {
+            final decoded = jsonDecode(payload);
+            if (decoded is Map) {
+              openNotificationData(Map<String, dynamic>.from(decoded));
+            }
+          } catch (error) {
+            debugPrint('Invalid Aadya Pro notification payload: $error');
+          }
+        },
+      );
+
+      final android = _local
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      await android?.createNotificationChannel(_aadyaProChannel);
+      await android?.createNotificationChannel(pharmacyOrdersChannel);
+      await android?.createNotificationChannel(appointmentRequestsChannel);
+    } catch (error) {
+      debugPrint('Local notifications unavailable: $error');
+    }
+  }
+
   Future<void> syncAuthenticatedDevice() async {
     if (!_initialized) await initialize();
     if (!_available) return;
@@ -246,6 +294,14 @@ class ProfessionalPushNotificationService {
     final data = _messageData(message);
     _events.add(DateTime.now().millisecondsSinceEpoch);
 
+    // While the app is open, new pharmacy orders and appointment requests
+    // are announced by the in-app ringer (which repeats until someone
+    // looks). Showing this push as well would ring twice for one order. The
+    // event above still triggers an immediate refresh.
+    final entity = '${data['entityType'] ?? data['relatedEntity'] ?? ''}';
+    if (entity == 'pharmacy_order') return;
+    if (entity == 'appointment' && data['kind'] == 'request') return;
+
     final title = message.notification?.title ?? data['title']?.toString();
     final body = message.notification?.body ?? data['message']?.toString();
     if ((title ?? '').isEmpty && (body ?? '').isEmpty) return;
@@ -253,7 +309,7 @@ class ProfessionalPushNotificationService {
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'aadya_pro_high_importance',
-        'Aadya Plus Professional alerts',
+        'Aadya Plus Pro alerts',
         channelDescription:
             'Clinical, pharmacy, diagnostics and field-force alerts',
         importance: Importance.high,
@@ -273,7 +329,7 @@ class ProfessionalPushNotificationService {
         0x7fffffff;
     await _local.show(
       id: id,
-      title: title ?? 'Aadya Plus Professional',
+      title: title ?? 'Aadya Plus Pro',
       body: body ?? '',
       notificationDetails: details,
       payload: jsonEncode(data),

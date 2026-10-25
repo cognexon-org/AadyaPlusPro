@@ -25,15 +25,15 @@ class _MrHomeState extends ConsumerState<MrHome> {
     try {
       await action();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Updated successfully')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Updated successfully')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     } finally {
       if (mounted) setState(() => _actionBusy = false);
@@ -44,7 +44,8 @@ class _MrHomeState extends ConsumerState<MrHome> {
     if (value == null) return false;
     final s = value.toString();
     final now = DateTime.now();
-    final key = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final key =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     return s.startsWith(key);
   }
 
@@ -59,23 +60,25 @@ class _MrHomeState extends ConsumerState<MrHome> {
         ? Map<String, dynamic>.from(state.dashboard['profile'])
         : state.profile;
     final today = state.attendance.cast<Map<String, dynamic>?>().firstWhere(
-          (row) => row != null && _isToday(row['dateKey']),
-          orElse: () => null,
-        );
+      (row) => row != null && _isToday(row['dateKey']),
+      orElse: () => null,
+    );
     final punchIn = today?['punchIn'];
     final punchOut = today?['punchOut'];
     final punchedIn = punchIn is Map && punchIn['at'] != null;
     final punchedOut = punchOut is Map && punchOut['at'] != null;
     final recent = state.dashboard['recentVisits'] is List
         ? (state.dashboard['recentVisits'] as List)
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
         : state.visits.take(5).toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${state.dashboard['experience'] ?? profile['designation'] ?? 'MR'} Field Force'),
+        title: Text(
+          '${state.dashboard['experience'] ?? profile['designation'] ?? 'MR'} Field Force',
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: notifier.loadAll,
@@ -92,7 +95,11 @@ class _MrHomeState extends ConsumerState<MrHome> {
                     const CircleAvatar(
                       radius: 27,
                       backgroundColor: Color(0xFFE0F2FE),
-                      child: Icon(Icons.badge_outlined, color: AppTheme.primary, size: 28),
+                      child: Icon(
+                        Icons.badge_outlined,
+                        color: AppTheme.primary,
+                        size: 28,
+                      ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -101,16 +108,25 @@ class _MrHomeState extends ConsumerState<MrHome> {
                         children: [
                           Text(
                             '${profile['name'] ?? profile['userName'] ?? profile['employeeCode'] ?? 'Field user'}',
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             [
-                              profile['employeeCode'],
-                              profile['headquarters'],
-                              profile['division'],
-                            ].where((e) => e != null && '$e'.trim().isNotEmpty).join(' • '),
-                            style: const TextStyle(color: AppTheme.textSecondary),
+                                  profile['employeeCode'],
+                                  profile['headquarters'],
+                                  profile['division'],
+                                ]
+                                .where(
+                                  (e) => e != null && '$e'.trim().isNotEmpty,
+                                )
+                                .join(' • '),
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -126,7 +142,13 @@ class _MrHomeState extends ConsumerState<MrHome> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Today\'s workday', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                    const Text(
+                      'Today\'s workday',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -156,9 +178,12 @@ class _MrHomeState extends ConsumerState<MrHome> {
                       punchedOut
                           ? 'Workday completed for today.'
                           : punchedIn
-                              ? 'GPS attendance is active for today.'
-                              : 'Start work records server time plus current GPS.',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                          ? 'GPS attendance is active for today.'
+                          : 'Start work records server time plus current GPS.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -169,36 +194,79 @@ class _MrHomeState extends ConsumerState<MrHome> {
               spacing: 10,
               runSpacing: 10,
               children: [
-                _Metric(label: 'Calls', value: '${metrics['calls'] ?? 0}', icon: Icons.call_outlined),
-                _Metric(label: 'Doctors', value: '${metrics['doctorCalls'] ?? 0}', icon: Icons.medical_services_outlined),
-                _Metric(label: 'POB', value: '₹${metrics['pobAmount'] ?? 0}', icon: Icons.receipt_long_outlined),
-                _Metric(label: 'Work days', value: '${metrics['workingDays'] ?? 0}', icon: Icons.calendar_today_outlined),
+                _Metric(
+                  label: 'Calls',
+                  value: '${metrics['calls'] ?? 0}',
+                  icon: Icons.call_outlined,
+                ),
+                _Metric(
+                  label: 'Doctors',
+                  value: '${metrics['doctorCalls'] ?? 0}',
+                  icon: Icons.medical_services_outlined,
+                ),
+                _Metric(
+                  label: 'POB',
+                  value: '₹${metrics['pobAmount'] ?? 0}',
+                  icon: Icons.receipt_long_outlined,
+                ),
+                _Metric(
+                  label: 'Work days',
+                  value: '${metrics['workingDays'] ?? 0}',
+                  icon: Icons.calendar_today_outlined,
+                ),
                 if ((metrics['teamSize'] ?? 0) != 0)
-                  _Metric(label: 'Team', value: '${metrics['teamSize']}', icon: Icons.groups_outlined),
+                  _Metric(
+                    label: 'Team',
+                    value: '${metrics['teamSize']}',
+                    icon: Icons.groups_outlined,
+                  ),
                 if ((metrics['pendingApprovals'] ?? 0) != 0)
-                  _Metric(label: 'Approvals', value: '${metrics['pendingApprovals']}', icon: Icons.pending_actions_outlined),
+                  _Metric(
+                    label: 'Approvals',
+                    value: '${metrics['pendingApprovals']}',
+                    icon: Icons.pending_actions_outlined,
+                  ),
               ],
             ),
             const SizedBox(height: 18),
-            const Text('Recent field calls', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            const Text(
+              'Recent field calls',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
             if (recent.isEmpty)
-              const Card(child: Padding(padding: EdgeInsets.all(18), child: Text('No calls recorded yet.')))
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Text('No calls recorded yet.'),
+                ),
+              )
             else
               ...recent.map((visit) {
-                final account = visit['accountId'] is Map ? visit['accountId'] as Map : const {};
-                final profileRow = visit['profileId'] is Map ? visit['profileId'] as Map : const {};
+                final account = visit['accountId'] is Map
+                    ? visit['accountId'] as Map
+                    : const {};
+                final profileRow = visit['profileId'] is Map
+                    ? visit['profileId'] as Map
+                    : const {};
                 return Card(
                   child: ListTile(
-                    leading: const CircleAvatar(child: Icon(Icons.location_on_outlined)),
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.location_on_outlined),
+                    ),
                     title: Text('${account['name'] ?? 'Field call'}'),
-                    subtitle: Text([
-                      account['type'],
-                      profileRow['employeeCode'],
-                      visit['status'],
-                    ].where((e) => e != null).join(' • ')),
+                    subtitle: Text(
+                      [
+                        account['type'],
+                        profileRow['employeeCode'],
+                        visit['status'],
+                      ].where((e) => e != null).join(' • '),
+                    ),
                     trailing: visit['geofenceStatus'] == 'outside'
-                        ? const Icon(Icons.warning_amber, color: AppTheme.warning)
+                        ? const Icon(
+                            Icons.warning_amber,
+                            color: AppTheme.warning,
+                          )
                         : null,
                   ),
                 );
@@ -232,8 +300,20 @@ class _Metric extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-                    Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                      ),
+                    ),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),

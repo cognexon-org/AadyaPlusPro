@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/pharmacy_type.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -184,7 +185,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
         ),
         child: Text(
           state.error ?? 'No pharmacy branch available',
-          style: PharmacyType.sans(fontSize: 12, color: PharmacyColors.error),
+          style: PharmacyType.sans(fontSize: 11.5, color: PharmacyColors.error),
         ),
       );
     }
@@ -214,7 +215,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.storefront_outlined,
+              LucideIcons.store,
               size: compact ? 14 : 16,
               color: PharmacyColors.textSecondary,
             ),
@@ -224,7 +225,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
                 name,
                 overflow: TextOverflow.ellipsis,
                 style: PharmacyType.sans(
-                  fontSize: compact ? 12.5 : 13.5,
+                  fontSize: compact ? 12.5 : 13,
                   fontWeight: FontWeight.w600,
                   color: PharmacyColors.textPrimary,
                 ),
@@ -257,7 +258,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(
-                  Icons.store_mall_directory_outlined,
+                  LucideIcons.store,
                   size: 18,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -275,7 +276,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
                       name,
                       overflow: TextOverflow.ellipsis,
                       style: PharmacyType.sans(
-                        fontSize: compact ? 12 : 13,
+                        fontSize: compact ? 11.5 : 13,
                         fontWeight: FontWeight.w600,
                         color: PharmacyColors.textPrimary,
                       ),
@@ -295,7 +296,7 @@ class PharmacyStoreSelector extends ConsumerWidget {
                       child: Text(
                         code,
                         style: PharmacyType.sans(
-                          fontSize: 10,
+                          fontSize: 10.5,
                           fontWeight: FontWeight.w600,
                           color: PharmacyColors.greenDark,
                         ),

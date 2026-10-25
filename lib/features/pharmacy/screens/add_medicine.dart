@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/pharmacy_type.dart';
 import '../theme/pharmacy_colors.dart';
 import '../../../core/network/api_service.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
+import '../providers/pharmacy_medicines_provider.dart';
+import '../widgets/pharmacy_barcode_scanner.dart';
 import '../widgets/pharmacy_ui.dart';
 
 class AddMedicine extends ConsumerStatefulWidget {
-  const AddMedicine({super.key});
+  /// Pre-fills the barcode — set when a scan found no matching medicine.
+  final String? initialBarcode;
+  const AddMedicine({super.key, this.initialBarcode});
 
   @override
   ConsumerState<AddMedicine> createState() => _AddMedicineState();
@@ -24,6 +28,9 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
   final _reorderController = TextEditingController();
   final _batchNumberController = TextEditingController();
   final _purchasePriceController = TextEditingController();
+  late final _barcodeController = TextEditingController(
+    text: widget.initialBarcode ?? '',
+  );
   final _nameFocus = FocusNode();
 
   bool _isLoading = false;
@@ -115,6 +122,7 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
     _reorderController.dispose();
     _batchNumberController.dispose();
     _purchasePriceController.dispose();
+    _barcodeController.dispose();
     _nameFocus.dispose();
     super.dispose();
   }
@@ -183,6 +191,8 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
         'reorderLevel': int.tryParse(_reorderController.text) ?? 10,
         'prescriptionRequired': _prescriptionRequired,
         'isActive': true,
+        if (_barcodeController.text.trim().isNotEmpty)
+          'barcode': _barcodeController.text.trim(),
       };
 
       final createResponse = await ApiService().createMedicine(payload);
@@ -216,6 +226,7 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
 
       // Refresh inventory
       ref.read(pharmacyDashboardProvider.notifier).loadMedicines();
+      ref.read(pharmacyMedicinesProvider.notifier).loadMedicines(silent: true);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -224,7 +235,7 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
             backgroundColor: PharmacyColors.success,
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -259,46 +270,87 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
         surfaceTintColor: Colors.transparent,
         iconTheme: const IconThemeData(color: PharmacyColors.textPrimary),
         title: Text(
-          'Add Medicine',
+          'Add medicine',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
         ),
       ),
+      // Save stays reachable at the foot of the form instead of scrolling
+      // away below the last field.
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+        decoration: const BoxDecoration(
+          color: PharmacyColors.bg,
+          border: Border(top: BorderSide(color: PharmacyColors.border)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: PharmacyButton(
+            label: 'Save medicine',
+            loading: _isLoading,
+            onPressed: _submit,
+          ),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const PharmacySectionTitle('Medicine'),
               Stack(
                 children: [
                   PharmacyTextField(
-                    label: 'Medicine Name',
+                    label: 'Medicine name',
                     controller: _nameController,
-                    icon: Icons.medication_outlined,
+                    icon: LucideIcons.search,
                     required: true,
-                    hint: 'Search medicine name...',
+                    hint: 'Start typing to search the catalogue',
                   ),
                   if (_searchingCatalog)
                     const Positioned(
-                      right: 12,
-                      top: 30,
+                      right: 14,
+                      top: 36,
                       child: SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: PharmacyColors.green,
+                        ),
                       ),
                     ),
                 ],
               ),
               if (_suggestions.isNotEmpty) _buildSuggestions(),
               PharmacyTextField(
-                label: 'Generic Name',
+                label: 'Barcode',
+                controller: _barcodeController,
+                icon: LucideIcons.barcode,
+                hint: 'Scan or type the code on the pack',
+                trailing: IconButton(
+                  tooltip: 'Scan barcode',
+                  icon: const Icon(
+                    LucideIcons.scanBarcode,
+                    size: 20,
+                    color: PharmacyColors.green,
+                  ),
+                  onPressed: () async {
+                    final code = await scanPharmacyBarcode(context);
+                    if (code != null) {
+                      setState(() => _barcodeController.text = code);
+                    }
+                  },
+                ),
+              ),
+              PharmacyTextField(
+                label: 'Generic name',
                 controller: _genericNameController,
-                icon: CupertinoIcons.textformat,
+                icon: LucideIcons.type,
                 required: true,
               ),
               Row(
@@ -308,7 +360,6 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
                     child: PharmacyDropdownField<String>(
                       label: 'Category',
                       value: _category,
-                      icon: CupertinoIcons.square_grid_2x2,
                       items: kMedicineCategories.entries
                           .map(
                             (e) => DropdownMenuItem(
@@ -317,11 +368,16 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
                                 children: [
                                   Icon(
                                     medicineCategoryIcon(e.key),
-                                    size: 17,
-                                    color: PharmacyColors.green,
+                                    size: 16,
+                                    color: PharmacyColors.textHeading,
                                   ),
-                                  const SizedBox(width: 10),
-                                  Text(e.value),
+                                  const SizedBox(width: 9),
+                                  Flexible(
+                                    child: Text(
+                                      e.value,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -336,21 +392,22 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
                     child: PharmacyTextField(
                       label: 'Strength',
                       controller: _strengthController,
-                      icon: Icons.monitor_weight_outlined,
                       hint: 'e.g. 500mg',
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              const PharmacySectionTitle('Price & stock'),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: PharmacyTextField(
-                      label: 'Selling Price (₹)',
+                      label: 'Selling price (₹)',
                       controller: _priceController,
-                      // icon: ,
-                      hint: '₹',
+                      icon: LucideIcons.indianRupee,
+                      hint: '0',
                       isDecimal: true,
                       required: true,
                     ),
@@ -358,88 +415,109 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: PharmacyTextField(
-                      label: 'Initial Stock',
+                      label: 'Opening stock',
                       controller: _stockController,
-                      icon: CupertinoIcons.cube_box,
+                      icon: LucideIcons.package,
                       isNum: true,
                       hint: 'Optional',
                     ),
                   ),
                 ],
               ),
-              if (_hasInitialStock) ...[
-                PharmacyCard(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(14),
-                  borderColor: PharmacyColors.info.withValues(alpha: 0.2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+              // Batch details slide open only once there is stock to record.
+              AnimatedSize(
+                duration: PharmacyMotion.medium,
+                curve: PharmacyMotion.enter,
+                alignment: Alignment.topCenter,
+                child: !_hasInitialStock
+                    ? const SizedBox(width: double.infinity)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(
-                            CupertinoIcons.info_circle,
-                            size: 16,
-                            color: PharmacyColors.info,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Stock is tracked as a batch — batch number and expiry are required to add initial stock.',
-                              style: PharmacyType.sans(
-                                fontSize: 12,
-                                color: PharmacyColors.info,
-                              ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 14),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 1),
+                                  child: Icon(
+                                    LucideIcons.info,
+                                    size: 14,
+                                    color: PharmacyColors.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    'Stock is tracked by batch, so the batch number and expiry printed on the pack are needed.',
+                                    style: PharmacyType.sans(
+                                      fontSize: 11.5,
+                                      height: 1.45,
+                                      color: PharmacyColors.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
+                          ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: PharmacyTextField(
+                                  label: 'Batch number',
+                                  controller: _batchNumberController,
+                                  icon: LucideIcons.hash,
+                                  required: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: PharmacyPickerField(
+                                  label: 'Expiry',
+                                  required: true,
+                                  valueText: _expiryDate == null
+                                      ? 'Select'
+                                      : '${_expiryDate!.day}/${_expiryDate!.month}/${_expiryDate!.year}',
+                                  onTap: _pickExpiryDate,
+                                ),
+                              ),
+                            ],
+                          ),
+                          PharmacyTextField(
+                            label: 'Purchase price (₹)',
+                            controller: _purchasePriceController,
+                            icon: LucideIcons.receiptText,
+                            isDecimal: true,
+                            hint: 'Defaults to the selling price',
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      PharmacyTextField(
-                        label: 'Batch Number',
-                        controller: _batchNumberController,
-                        icon: CupertinoIcons.number,
-                        required: true,
-                      ),
-                      PharmacyPickerField(
-                        label: 'Expiry Date',
-                        required: true,
-                        valueText: _expiryDate == null
-                            ? 'Select expiry date'
-                            : '${_expiryDate!.day}/${_expiryDate!.month}/${_expiryDate!.year}',
-                        onTap: _pickExpiryDate,
-                      ),
-                      PharmacyTextField(
-                        label: 'Purchase Price (₹)',
-                        controller: _purchasePriceController,
-                        icon: Icons.receipt_long_outlined,
-                        isDecimal: true,
-                        hint: 'Defaults to selling price',
-                        margin: EdgeInsets.zero,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
+              const SizedBox(height: 8),
+              const PharmacySectionTitle('Alerts & rules'),
               PharmacyTextField(
-                label: 'Reorder Alert Level',
+                label: 'Reorder alert at',
                 controller: _reorderController,
-                icon: CupertinoIcons.exclamationmark_triangle,
+                icon: LucideIcons.bellRing,
                 isNum: true,
-                hint: 'e.g. 10',
+                hint: 'e.g. 10 units',
               ),
-              PharmacySwitchRow(
-                label: 'Requires Prescription',
-                icon: CupertinoIcons.doc_text,
-                value: _prescriptionRequired,
-                onChanged: (val) => setState(() => _prescriptionRequired = val),
-                margin: EdgeInsets.zero,
-              ),
-              const SizedBox(height: 28),
-              PharmacyButton(
-                label: 'Save Medicine',
-                loading: _isLoading,
-                onPressed: _submit,
+              PharmacyGroup(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 10, 4),
+                    child: PharmacySwitchRow(
+                      label: 'Prescription required',
+                      subtitle: 'Customers must attach a valid prescription',
+                      value: _prescriptionRequired,
+                      onChanged: (val) =>
+                          setState(() => _prescriptionRequired = val),
+                      margin: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -462,7 +540,7 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: _suggestions.length,
-        separatorBuilder: (_, __) =>
+        separatorBuilder: (_, _) =>
             const Divider(height: 1, color: PharmacyColors.border),
         itemBuilder: (context, index) {
           final s = _suggestions[index];
@@ -481,7 +559,7 @@ class _AddMedicineState extends ConsumerState<AddMedicine> {
             title: Text(
               name,
               style: PharmacyType.sans(
-                fontSize: 13.5,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),

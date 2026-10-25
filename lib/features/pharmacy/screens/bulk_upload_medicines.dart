@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../theme/pharmacy_type.dart';
@@ -12,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../core/network/api_service.dart';
 import '../theme/pharmacy_colors.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
+import '../providers/pharmacy_medicines_provider.dart';
 import '../widgets/pharmacy_ui.dart';
 
 class BulkUploadMedicines extends ConsumerStatefulWidget {
@@ -196,6 +196,7 @@ class _BulkUploadMedicinesState extends ConsumerState<BulkUploadMedicines> {
         _isPreview = false;
       });
       ref.read(pharmacyDashboardProvider.notifier).loadMedicines();
+      ref.read(pharmacyMedicinesProvider.notifier).loadMedicines(silent: true);
     } on DioException catch (e) {
       final data = e.response?.data;
       final serverMessage = data is Map
@@ -221,111 +222,92 @@ class _BulkUploadMedicinesState extends ConsumerState<BulkUploadMedicines> {
         surfaceTintColor: Colors.transparent,
         iconTheme: const IconThemeData(color: PharmacyColors.textPrimary),
         title: Text(
-          'Import Medicines',
+          'Import medicines',
           style: PharmacyType.sans(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: PharmacyColors.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: PharmacyColors.textStrong,
           ),
         ),
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
-            _StepIndicator(current: _step),
-            const SizedBox(height: 20),
-            PharmacyCard(
-              margin: EdgeInsets.zero,
+            PharmacyEntrance(child: _StepIndicator(current: _step)),
+            const SizedBox(height: 24),
+            PharmacyEntrance(
+              index: 1,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  const PharmacySectionTitle('1. Get the template'),
+                  PharmacyGroup(
                     children: [
-                      Icon(
-                        CupertinoIcons.arrow_down_doc,
-                        size: 18,
-                        color: PharmacyColors.info,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 13, 12, 13),
+                        child: Row(
                           children: [
-                            Text(
-                              'Get the template',
-                              style: PharmacyType.sans(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
-                                color: PharmacyColors.textPrimary,
+                            const Icon(
+                              LucideIcons.fileSpreadsheet,
+                              size: 19,
+                              color: PharmacyColors.textHeading,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Sample file', style: _body),
+                                  Text(
+                                    'Has the exact columns to fill in',
+                                    style: _caption,
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              'Download the sample file with the exact columns to fill in',
-                              style: PharmacyType.sans(
-                                fontSize: 11.5,
-                                color: PharmacyColors.textSecondary,
-                              ),
-                            ),
+                            _downloadingTemplate
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: PharmacyColors.green,
+                                    ),
+                                  )
+                                : GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: _downloadTemplate,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(4),
+                                      child: Text(
+                                        'Download',
+                                        style: _body.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: PharmacyColors.greenDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                           ],
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 14),
-                  PharmacySecondaryButton(
-                    label: _downloadingTemplate
-                        ? 'Downloading…'
-                        : 'Download Sample File',
-                    icon: CupertinoIcons.arrow_down_doc,
-                    onPressed: _downloadingTemplate ? null : _downloadTemplate,
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            PharmacyCard(
-              margin: EdgeInsets.zero,
+            const SizedBox(height: 24),
+            PharmacyEntrance(
+              index: 2,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Icon(
-                        CupertinoIcons.arrow_up_doc,
-                        size: 18,
-                        color: PharmacyColors.green,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Select CSV or Excel file',
-                              style: PharmacyType.sans(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
-                                color: PharmacyColors.textPrimary,
-                              ),
-                            ),
-                            Text(
-                              'Fill the template, then upload it here',
-                              style: PharmacyType.sans(
-                                fontSize: 11.5,
-                                color: PharmacyColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
+                  const PharmacySectionTitle('2. Upload your file'),
                   _dropZone(),
                   const SizedBox(height: 14),
                   PharmacyButton(
-                    label: _uploading ? 'Checking…' : 'Check File',
+                    label: _uploading ? 'Checking…' : 'Check file',
                     icon: LucideIcons.listChecks,
                     loading: _uploading,
                     onPressed: (_pickedFilePath == null || _uploading)
@@ -336,97 +318,27 @@ class _BulkUploadMedicinesState extends ConsumerState<BulkUploadMedicines> {
               ),
             ),
             if (_report != null) ...[
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: PharmacyMetricTile(
-                      label: _isPreview ? 'Ready' : 'Added',
-                      value: '$_validCount',
-                      color: PharmacyColors.success,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: PharmacyMetricTile(
-                      label: 'Warnings',
-                      value: '${_report!['warnings'] ?? 0}',
-                      color: PharmacyColors.warning,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: PharmacyMetricTile(
-                      label: 'Errors',
-                      value: '${_report!['failed'] ?? 0}',
-                      color: PharmacyColors.error,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 28),
+              PharmacySectionTitle(
+                _isPreview ? '3. Review and import' : 'Import result',
               ),
-              const SizedBox(height: 14),
+              _summary(),
+              const SizedBox(height: 12),
               _confirmBar(),
-              const SizedBox(height: 16),
-              Text(
-                _isPreview ? 'What will be imported' : 'Import result',
-                style: PharmacyType.sans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: PharmacyColors.textPrimary,
+              if (results.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                PharmacySectionTitle(
+                  _isPreview ? 'Rows in the file' : 'Rows imported',
                 ),
-              ),
-              const SizedBox(height: 10),
-              ...results.map((r) {
-                final status = r['status']?.toString() ?? '';
-                final failed = status == 'failed';
-                final note = r['error'] ?? r['note'];
-                return PharmacyCard(
-                  borderColor: failed
-                      ? PharmacyColors.error.withValues(alpha: 0.3)
-                      : null,
-                  child: Row(
-                    children: [
-                      Icon(
-                        failed
-                            ? CupertinoIcons.xmark_circle
-                            : CupertinoIcons.checkmark_circle,
-                        size: 18,
-                        color: failed
-                            ? PharmacyColors.error
-                            : PharmacyColors.success,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Row ${r['row']}: ${r['medicineName'] ?? ''}',
-                              style: PharmacyType.sans(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: PharmacyColors.textPrimary,
-                              ),
-                            ),
-                            if (note != null) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                '$note',
-                                style: PharmacyType.sans(
-                                  fontSize: 11.5,
-                                  color: failed
-                                      ? PharmacyColors.error
-                                      : PharmacyColors.warning,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
+                PharmacyGroup(
+                  children: [
+                    for (var i = 0; i < results.length; i++) ...[
+                      if (i > 0) const PharmacyHairline(),
+                      _resultRow(results[i]),
                     ],
-                  ),
-                );
-              }),
+                  ],
+                ),
+              ],
             ],
           ],
         ),
@@ -434,194 +346,220 @@ class _BulkUploadMedicinesState extends ConsumerState<BulkUploadMedicines> {
     );
   }
 
-  /// Sits between the counts and the row list. In preview it is the commit
-  /// control; after the import it is the receipt. Nothing reaches the
-  /// database until the button here is pressed.
-  Widget _confirmBar() {
-    if (!_isPreview) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-        decoration: BoxDecoration(
-          color: PharmacyColors.greenVeryLight,
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: PharmacyColors.greenLight),
-        ),
-        child: Row(
+  static final _body = PharmacyType.sans(
+    fontSize: 13,
+    fontWeight: FontWeight.w500,
+    color: PharmacyColors.textPrimary,
+  );
+  static final _caption = PharmacyType.sans(
+    fontSize: 11.5,
+    color: PharmacyColors.textSecondary,
+  );
+
+  /// Three counts in one panel — coloured numbers, no tinted tiles.
+  Widget _summary() {
+    Widget cell(String label, Object value, Color tone) => Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
           children: [
-            const Icon(
-              LucideIcons.circleCheckBig,
-              size: 17,
-              color: PharmacyColors.greenDark,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '$_validCount ${_validCount == 1 ? 'medicine' : 'medicines'} added to your inventory',
-                style: PharmacyType.sans(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: PharmacyColors.textPrimary,
-                ),
+            Text(
+              '$value',
+              style: PharmacyType.number(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: tone,
               ),
+            ),
+            const SizedBox(height: 1),
+            Text(label, style: _caption),
+          ],
+        ),
+      ),
+    );
+    Widget divider() =>
+        Container(width: 1, height: 32, color: PharmacyColors.bg);
+    final failed = num.tryParse('${_report!['failed'] ?? 0}') ?? 0;
+    final warnings = num.tryParse('${_report!['warnings'] ?? 0}') ?? 0;
+    return PharmacyGroup(
+      children: [
+        Row(
+          children: [
+            cell(
+              _isPreview ? 'Ready' : 'Added',
+              _validCount,
+              PharmacyColors.greenDark,
+            ),
+            divider(),
+            cell(
+              'Warnings',
+              warnings,
+              warnings > 0
+                  ? PharmacyColors.warning
+                  : PharmacyColors.textSecondary,
+            ),
+            divider(),
+            cell(
+              'Errors',
+              failed,
+              failed > 0 ? PharmacyColors.error : PharmacyColors.textSecondary,
             ),
           ],
         ),
-      );
-    }
+      ],
+    );
+  }
 
-    final nothingToImport = _validCount == 0;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(13, 12, 13, 13),
-      decoration: BoxDecoration(
-        color: PharmacyColors.bgSecondary,
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: PharmacyColors.borderStrong),
-      ),
-      child: Column(
+  Widget _resultRow(Map r) {
+    final failed = '${r['status'] ?? ''}' == 'failed';
+    final note = r['error'] ?? r['note'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                nothingToImport
-                    ? LucideIcons.circleAlert
-                    : LucideIcons.hourglass,
-                size: 16,
-                color: nothingToImport
-                    ? PharmacyColors.error
-                    : PharmacyColors.warning,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  nothingToImport
-                      ? 'Nothing to import yet'
-                      : 'Nothing has been saved yet',
-                  style: PharmacyType.sans(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: PharmacyColors.textStrong,
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              failed ? LucideIcons.circleX : LucideIcons.circleCheck,
+              size: 17,
+              color: failed ? PharmacyColors.error : PharmacyColors.greenDark,
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${r['medicineName'] ?? 'Unnamed'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _body,
+                ),
+                Text(
+                  note == null ? 'Row ${r['row']}' : 'Row ${r['row']} · $note',
+                  style: _caption.copyWith(
+                    color: note == null
+                        ? PharmacyColors.textSecondary
+                        : failed
+                        ? PharmacyColors.error
+                        : PharmacyColors.warning,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(left: 25),
-            child: Text(
-              nothingToImport
-                  ? 'Every row has an error. Fix them in the file and check it again.'
-                  : 'This is a preview of the file. Review the rows below, then confirm to add them.',
-              style: PharmacyType.sans(
-                fontSize: 11.5,
-                height: 1.45,
-                color: PharmacyColors.textSecondary,
-              ),
+              ],
             ),
           ),
-          if (!nothingToImport) ...[
-            const SizedBox(height: 12),
-            PharmacyButton(
-              label: _importing
-                  ? 'Importing…'
-                  : 'Confirm & Import $_validCount ${_validCount == 1 ? 'Medicine' : 'Medicines'}',
-              icon: LucideIcons.circleCheckBig,
-              loading: _importing,
-              onPressed: _importing ? null : _confirmImport,
-            ),
-          ],
         ],
       ),
     );
   }
 
-  /// The file picker, as a drop-zone: a tall dashed panel with the icon, the
-  /// call to action and the accepted formats stacked in its centre.
-  ///
-  /// A dashed edge is the established signal for "put a file here" — a solid
-  /// 1px box reads as a text input, which is what this looked like before and
-  /// why it was easy to miss. Flutter has no dashed BorderSide, so the dashes
-  /// are stroked by [_DashedBorderPainter] as a foreground painter; drawing
-  /// them behind the child would put half of each dash under the panel fill.
+  /// In preview it is the commit control; after the import it is the
+  /// receipt. Nothing reaches the database until the button here is pressed.
+  Widget _confirmBar() {
+    if (!_isPreview) {
+      return PharmacyGroup(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(
+                  LucideIcons.circleCheckBig,
+                  size: 18,
+                  color: PharmacyColors.greenDark,
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Text(
+                    '$_validCount ${_validCount == 1 ? 'medicine' : 'medicines'} added to your inventory',
+                    style: _body.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final nothingToImport = _validCount == 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          nothingToImport
+              ? 'Every row has an error. Fix them in the file and check it again.'
+              : 'Nothing has been saved yet. Review the rows below, then import.',
+          style: _caption.copyWith(height: 1.45),
+        ),
+        if (!nothingToImport) ...[
+          const SizedBox(height: 12),
+          PharmacyButton(
+            label: _importing
+                ? 'Importing…'
+                : 'Import $_validCount ${_validCount == 1 ? 'medicine' : 'medicines'}',
+            icon: LucideIcons.check,
+            loading: _importing,
+            onPressed: _importing ? null : _confirmImport,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The file picker as a drop zone: a dashed panel — the established
+  /// signal for "put a file here" — with the call to action in its centre.
   Widget _dropZone() {
     final picked = _pickedFileName != null;
-    final edge = picked ? PharmacyColors.green : PharmacyColors.textDisabled;
-
-    return InkWell(
+    return PharmacyPressable(
       onTap: _pickFile,
-      borderRadius: BorderRadius.circular(14),
+      scale: 0.99,
       child: CustomPaint(
-        foregroundPainter: _DashedBorderPainter(color: edge, radius: 14),
+        foregroundPainter: _DashedBorderPainter(
+          color: picked ? PharmacyColors.green : PharmacyColors.textDisabled,
+          radius: 14,
+        ),
         child: Container(
           width: double.infinity,
-          height: 186,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 26),
           decoration: BoxDecoration(
-            color: picked
-                ? PharmacyColors.greenVeryLight
-                : PharmacyColors.bgSecondary,
+            color: PharmacyColors.panel,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 54,
-                height: 54,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: picked
-                      ? PharmacyColors.greenLight
-                      : PharmacyColors.cardElevated,
+                width: 48,
+                height: 48,
+                decoration: const BoxDecoration(
+                  color: PharmacyColors.bg,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: picked
-                        ? PharmacyColors.greenLight
-                        : PharmacyColors.borderStrong,
-                  ),
                 ),
                 child: Icon(
                   picked ? LucideIcons.fileCheck2 : LucideIcons.cloudUpload,
-                  size: 24,
+                  size: 21,
                   color: picked
                       ? PharmacyColors.greenDark
-                      : PharmacyColors.green,
+                      : PharmacyColors.textHeading,
                 ),
               ),
-              const SizedBox(height: 13),
+              const SizedBox(height: 12),
               Text(
-                picked ? _pickedFileName! : 'Choose file',
+                picked ? _pickedFileName! : 'Choose a file',
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
-                style: PharmacyType.sans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                style: _body.copyWith(
+                  fontWeight: FontWeight.w600,
                   color: PharmacyColors.textStrong,
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
-                picked
-                    ? 'Tap to pick a different file'
-                    : 'Tap to browse files on this device',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: PharmacyType.sans(
-                  fontSize: 11.5,
-                  color: PharmacyColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 13),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _formatPill('.CSV'),
-                  const SizedBox(width: 7),
-                  _formatPill('.XLSX'),
-                ],
+                picked ? 'Tap to pick a different file' : '.csv or .xlsx',
+                style: _caption,
               ),
             ],
           ),
@@ -629,96 +567,50 @@ class _BulkUploadMedicinesState extends ConsumerState<BulkUploadMedicines> {
       ),
     );
   }
-
-  Widget _formatPill(String label) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-    decoration: BoxDecoration(
-      color: PharmacyColors.cardElevated,
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: Text(
-      label,
-      style: PharmacyType.sans(
-        fontSize: 10,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
-        color: PharmacyColors.textSecondary,
-      ),
-    ),
-  );
 }
 
+/// Three steps as a thin segmented bar with the current step named — a row
+/// of numbered circles was more chrome than the screen needed.
 class _StepIndicator extends StatelessWidget {
   final int current;
   const _StepIndicator({required this.current});
 
-  static const _labels = ['Upload', 'Preview', 'Confirm'];
+  static const _labels = ['Upload', 'Preview', 'Import'];
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(_labels.length * 2 - 1, (i) {
-        if (i.isOdd) {
-          final leftDone = (i - 1) ~/ 2 < current;
-          return Expanded(
-            child: Container(
-              height: 2,
-              color: leftDone ? PharmacyColors.green : PharmacyColors.border,
-            ),
-          );
-        }
-        final step = i ~/ 2;
-        final done = step < current;
-        final active = step == current;
-        return Column(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Step ${current + 1} of 3 · ${_labels[current]}',
+          style: PharmacyType.sans(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: PharmacyColors.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
           children: [
-            Container(
-              width: 26,
-              height: 26,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: done || active
-                    ? PharmacyColors.green
-                    : PharmacyColors.bgSecondary,
-                border: Border.all(
-                  color: done || active
-                      ? PharmacyColors.green
-                      : PharmacyColors.border,
+            for (var i = 0; i < 3; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              Expanded(
+                child: AnimatedContainer(
+                  duration: PharmacyMotion.medium,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: i <= current
+                        ? PharmacyColors.green
+                        : PharmacyColors.panel,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-              child: done
-                  ? const Icon(
-                      CupertinoIcons.checkmark,
-                      size: 13,
-                      color: Colors.white,
-                    )
-                  : Text(
-                      '${step + 1}',
-                      style: PharmacyType.sans(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: active
-                            ? Colors.white
-                            : PharmacyColors.textTertiary,
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _labels[step],
-              style: PharmacyType.sans(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w500,
-                color: done || active
-                    ? PharmacyColors.textPrimary
-                    : PharmacyColors.textTertiary,
-              ),
-            ),
+            ],
           ],
-        );
-      }),
+        ),
+      ],
     );
   }
 }

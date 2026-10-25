@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -126,7 +125,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                     ? Text(
                         name[0].toUpperCase(),
                         style: PharmacyType.sans(
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: PharmacyColors.greenDark,
                         ),
@@ -147,7 +146,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: PharmacyType.sans(
-                        fontSize: 13.5,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: PharmacyColors.textStrong,
                       ),
@@ -160,7 +159,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: PharmacyType.sans(
-                        fontSize: 11,
+                        fontSize: 11.5,
                         color: PharmacyColors.textTertiary,
                       ),
                     ),
@@ -372,7 +371,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
         title: Text(
           'New Sale',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
@@ -397,7 +396,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                     Text(
                       'Cart (${_cart.length})',
                       style: PharmacyType.sans(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                         color: PharmacyColors.textPrimary,
                       ),
@@ -426,7 +425,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                                           name,
                                           overflow: TextOverflow.ellipsis,
                                           style: PharmacyType.sans(
-                                            fontSize: 13,
+                                            fontSize: 12.5,
                                             fontWeight: FontWeight.w600,
                                             color: PharmacyColors.textPrimary,
                                           ),
@@ -446,7 +445,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                                   Text(
                                     '₹$price',
                                     style: PharmacyType.sans(
-                                      fontSize: 12,
+                                      fontSize: 11.5,
                                       color: PharmacyColors.textSecondary,
                                     ),
                                   ),
@@ -455,7 +454,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                             ),
                             IconButton(
                               onPressed: () => _updateCartQty(i, -1),
-                              icon: const Icon(CupertinoIcons.minus, size: 15),
+                              icon: const Icon(LucideIcons.minus, size: 15),
                               color: PharmacyColors.textSecondary,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
@@ -469,7 +468,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                                 '${cItem['qty']}',
                                 textAlign: TextAlign.center,
                                 style: PharmacyType.sans(
-                                  fontSize: 13.5,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                   color: PharmacyColors.textPrimary,
                                 ),
@@ -477,7 +476,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                             ),
                             IconButton(
                               onPressed: () => _updateCartQty(i, 1),
-                              icon: const Icon(CupertinoIcons.plus, size: 15),
+                              icon: const Icon(LucideIcons.plus, size: 15),
                               color: PharmacyColors.green,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
@@ -489,10 +488,10 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                             SizedBox(
                               width: 56,
                               child: Text(
-                                '₹${price * cItem['qty']}',
+                                pharmacyRupees(price * cItem['qty']),
                                 textAlign: TextAlign.right,
                                 style: PharmacyType.sans(
-                                  fontSize: 13,
+                                  fontSize: 12.5,
                                   fontWeight: FontWeight.w700,
                                   color: PharmacyColors.textPrimary,
                                 ),
@@ -501,10 +500,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                             IconButton(
                               onPressed: () =>
                                   setState(() => _cart.removeAt(i)),
-                              icon: const Icon(
-                                CupertinoIcons.xmark_circle_fill,
-                                size: 16,
-                              ),
+                              icon: const Icon(LucideIcons.circleX, size: 16),
                               color: PharmacyColors.textTertiary,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
@@ -525,8 +521,8 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                       children: [
                         Icon(
                           _searchExpanded
-                              ? CupertinoIcons.chevron_up
-                              : CupertinoIcons.add,
+                              ? LucideIcons.chevronUp
+                              : LucideIcons.plus,
                           size: 14,
                           color: PharmacyColors.green,
                         ),
@@ -534,7 +530,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                         Text(
                           'Add More Items',
                           style: PharmacyType.sans(
-                            fontSize: 12.5,
+                            fontSize: 11.5,
                             fontWeight: FontWeight.w600,
                             color: PharmacyColors.green,
                           ),
@@ -546,7 +542,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                     const SizedBox(height: 8),
                     if (filteredMedicines.isEmpty)
                       const PharmacyEmptyStateInline(
-                        icon: Icons.medication_outlined,
+                        icon: LucideIcons.pill,
                         text: 'No medicines match your search',
                       )
                     else
@@ -566,7 +562,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                                     Text(
                                       name,
                                       style: PharmacyType.sans(
-                                        fontSize: 13,
+                                        fontSize: 12.5,
                                         fontWeight: FontWeight.w600,
                                         color: PharmacyColors.textPrimary,
                                       ),
@@ -588,7 +584,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                                     ? () => _addToCart(m)
                                     : null,
                                 icon: Icon(
-                                  CupertinoIcons.add_circled_solid,
+                                  LucideIcons.circlePlus,
                                   color: stock > 0
                                       ? PharmacyColors.green
                                       : PharmacyColors.textDisabled,
@@ -604,7 +600,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                     PharmacyTextField(
                       label: 'Prescription ID',
                       controller: _prescriptionIdController,
-                      icon: CupertinoIcons.doc_text,
+                      icon: LucideIcons.fileText,
                       required: true,
                       margin: EdgeInsets.zero,
                     ),
@@ -613,7 +609,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                   Text(
                     'Payment Method',
                     style: PharmacyType.sans(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: PharmacyColors.textPrimary,
                     ),
@@ -649,14 +645,14 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                       Text(
                         'Total Amount',
                         style: PharmacyType.sans(
-                          fontSize: 13.5,
+                          fontSize: 13,
                           color: PharmacyColors.textSecondary,
                         ),
                       ),
                       Text(
-                        '₹${_getCartTotal().toStringAsFixed(2)}',
+                        pharmacyRupees(_getCartTotal()),
                         style: PharmacyType.sans(
-                          fontSize: 20,
+                          fontSize: 17,
                           fontWeight: FontWeight.w700,
                           color: PharmacyColors.textPrimary,
                         ),
@@ -776,7 +772,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
         Text(
           'Customer',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w700,
             color: PharmacyColors.textStrong,
           ),
@@ -789,11 +785,11 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
           indicatorColor: PharmacyColors.green,
           indicatorSize: TabBarIndicatorSize.tab,
           labelStyle: PharmacyType.sans(
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: FontWeight.w700,
           ),
           unselectedLabelStyle: PharmacyType.sans(
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: FontWeight.w500,
           ),
           tabs: const [
@@ -872,7 +868,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
                 child: Text(
                   display.isEmpty ? '?' : display[0].toUpperCase(),
                   style: PharmacyType.sans(
-                    fontSize: 13.5,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: PharmacyColors.greenDark,
                   ),
@@ -888,7 +884,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: PharmacyType.sans(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: PharmacyColors.textStrong,
                       ),
@@ -898,7 +894,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
                       Text(
                         phone,
                         style: PharmacyType.number(
-                          fontSize: 11,
+                          fontSize: 11.5,
                           color: PharmacyColors.textTertiary,
                         ),
                       ),
@@ -952,7 +948,7 @@ class _CustomerPickerSheetState extends State<_CustomerPickerSheet>
             'customer record, so they appear under Existing after their '
             'first purchase.',
             style: PharmacyType.sans(
-              fontSize: 11,
+              fontSize: 11.5,
               height: 1.45,
               color: PharmacyColors.textTertiary,
             ),

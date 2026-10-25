@@ -78,6 +78,14 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
   @override
   void dispose() {
     _poll?.cancel();
+    // Swiping the sheet away skips Cancel, which left the QR live: the
+    // customer could still pay it with nobody watching for the result.
+    if (_id.isNotEmpty && _status == 'created' && !_closing) {
+      // Best-effort; the QR expires on its own if this fails.
+      unawaited(
+        _api.closeCounterPayment(_id).then<void>((_) {}, onError: (_) {}),
+      );
+    }
     super.dispose();
   }
 
@@ -165,7 +173,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
                   Text(
                     _isPaid ? 'Payment received' : 'Collect payment',
                     style: PharmacyType.sans(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: PharmacyColors.textStrong,
                     ),
@@ -184,7 +192,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
             Text(
               _rupees(widget.amount),
               style: PharmacyType.number(
-                fontSize: 20,
+                fontSize: 17,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -0.4,
                 color: PharmacyColors.textStrong,
@@ -265,7 +273,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
                   : 'This QR expired before it was paid.',
               textAlign: TextAlign.center,
               style: PharmacyType.sans(
-                fontSize: 12.5,
+                fontSize: 11.5,
                 color: PharmacyColors.textSecondary,
               ),
             ),
@@ -343,7 +351,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
               child: Text(
                 'Waiting for payment…',
                 style: PharmacyType.sans(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -353,7 +361,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
               Text(
                 _expiryLabel()!,
                 style: PharmacyType.sans(
-                  fontSize: 11,
+                  fontSize: 11.5,
                   color: PharmacyColors.textTertiary,
                 ),
               ),
@@ -396,7 +404,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
           Text(
             '${_rupees(paise / 100)} received',
             style: PharmacyType.number(
-              fontSize: 18,
+              fontSize: 15,
               fontWeight: FontWeight.w800,
               color: PharmacyColors.textStrong,
             ),
@@ -406,7 +414,7 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
             Text(
               'from $vpa',
               style: PharmacyType.sans(
-                fontSize: 12,
+                fontSize: 11.5,
                 color: PharmacyColors.textSecondary,
               ),
             ),

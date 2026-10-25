@@ -1,408 +1,1175 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
-import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../shared/screens/app_chat_screen.dart';
-import '../../../core/network/api_service.dart';
-import 'physio_exercise_plan_editor.dart';
-import 'physio_exercise_plan_detail.dart';
+import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../shared/ui/app_ui.dart';
+import '../../doctor/widgets/doctor_ui.dart';
+import '../../doctor/widgets/patient_summary.dart';
+import '../providers/physio_care_provider.dart';
+import '../widgets/physio_course_card.dart';
+import '../widgets/physio_course_sheet.dart';
+import '../widgets/physio_progress_charts.dart';
+import 'physio_appointment_details.dart';
+import 'physio_assessment_detail.dart';
+import 'physio_assessment_editor.dart';
+import 'physio_exercise_plan_detail.dart';
+import 'physio_exercise_plan_editor.dart';
+
+enum _Tab { overview, sessions, exercises, progress }
+
+String _date(DateTime? d) => d == null
+    ? '—'
+    : DateFormat(
+        d.year == DateTime.now().year ? 'd MMM' : 'd MMM yyyy',
+      ).format(d);
+
+/// One patient's record with the signed-in physio: treatment course, next
+/// session and latest pain (Overview), their sessions, exercise plans with
+/// adherence, and measured progress from assessments.
 class PhysioPatientDetails extends ConsumerStatefulWidget {
+  /// The patient as the caller knew them (at least `_id`; name, phone, age,
+  /// gender when known).
   final Map<String, dynamic> patient;
 
-  const PhysioPatientDetails({super.key, required this.patient});
+  /// 0 Overview, 1 Sessions, 2 Exercises, 3 Progress.
+  final int initialTab;
+
+  const PhysioPatientDetails({
+    super.key,
+    required this.patient,
+    this.initialTab = 0,
+  });
 
   @override
-  ConsumerState<PhysioPatientDetails> createState() => _PhysioPatientDetailsState();
+  ConsumerState<PhysioPatientDetails> createState() =>
+      _PhysioPatientDetailsState();
 }
 
 class _PhysioPatientDetailsState extends ConsumerState<PhysioPatientDetails> {
-  final ApiService _api = ApiService();
-  bool _loadingApts = true;
-  List<Map<String, dynamic>> _appointments = [];
-  bool _loadingPlans = true;
-  List<Map<String, dynamic>> _plans = [];
+  late _Tab _tab =
+      _Tab.values[widget.initialTab.clamp(0, _Tab.values.length - 1)];
+
+  late final String _id = () {
+    final p = widget.patient;
+    final id = refId(p['_id']);
+    return id.isNotEmpty ? id : refId(p['patientId']);
+  }();
 
   @override
   void initState() {
     super.initState();
-    _fetchPatientAppointments();
-    _fetchExercisePlans();
+    Future.microtask(() {
+      if (!mounted) return;
+      final st = ref.read(physioCoursesProvider);
+      ref.read(physioCoursesProvider.notifier).load(silent: st.hasLoaded);
+    });
   }
 
-  Future<void> _fetchPatientAppointments() async {
-    final patientId = widget.patient['_id'] ?? widget.patient['patientId']?['_id'] ?? '';
-    if (patientId.isEmpty) return;
-
-    try {
-      final res = await _api.getAppointmentsByPatient(patientId);
-      if (res.data['success']) {
-        final list = res.data['appointments'] as List? ?? [];
-        _appointments = list.map((e) => Map<String, dynamic>.from(e)).toList();
-        // Filter for this professional only
-        final profile = ref.read(physioDashboardProvider).profile;
-        final profId = profile['_id'];
-        _appointments = _appointments.where((a) => a['physioId']?.toString() == profId?.toString()).toList();
+  /// What the caller knew, with gaps filled from a course's populated patient.
+  Map<String, dynamic> _patient(PhysioCoursesState courses) {
+    final out = {...widget.patient, '_id': _id};
+    for (final c in courses.forPatient(_id)) {
+      final p = c['patientId'];
+      if (p is! Map) continue;
+      for (final e in p.entries) {
+        final v = e.value;
+        if (v != null && '$v'.isNotEmpty && out['${e.key}'] == null) {
+          out['${e.key}'] = v;
+        }
       }
-    } catch (e) {
-      debugPrint('Error fetching patient apts: $e');
-    } finally {
-      if (mounted) setState(() => _loadingApts = false);
+    }
+    return out;
+  }
+
+  String _nameOf(Map<String, dynamic> p) {
+    final n = '${p['name'] ?? ''}'.trim();
+    return n.isEmpty ? 'Patient' : n;
+  }
+
+  Future<void> _refresh() async {
+    final courses = ref.read(physioCoursesProvider.notifier).load(silent: true);
+    final Future<Object?> tab = switch (_tab) {
+      _Tab.overview => Future.wait([
+        ref.refresh(physioPatientSessionsProvider(_id).future),
+        ref.refresh(physioProgressProvider(_id).future),
+      ]),
+      _Tab.sessions => ref.refresh(physioPatientSessionsProvider(_id).future),
+      _Tab.exercises => ref.refresh(physioCarePlansProvider(_id).future),
+      _Tab.progress => Future.wait([
+        ref.refresh(physioProgressProvider(_id).future),
+        ref.refresh(physioAssessmentsProvider(_id).future),
+      ]),
+    };
+    // Errors are shown from the providers' error states.
+    await Future.wait<Object?>([
+      courses,
+      tab,
+    ]).then<void>((_) {}, onError: (_) {});
+  }
+
+  // ─────────────────────────── Navigation ───────────────────────────
+
+  Future<void> _call(String phone) async {
+    final ok = await launchUrl(Uri(scheme: 'tel', path: phone));
+    if (!ok && mounted) {
+      showAppError(context, null, fallback: 'Couldn’t start a call.');
     }
   }
 
-  String get _patientId => (widget.patient['_id'] ?? widget.patient['patientId']?['_id'] ?? '').toString();
+  Future<void> _startCourse(Map<String, dynamic> patient) =>
+      showStartCourseSheet(
+        context,
+        patientId: _id,
+        patientName: _nameOf(patient),
+        patient: patient,
+      );
 
-  Future<void> _fetchExercisePlans() async {
-    if (_patientId.isEmpty) {
-      if (mounted) setState(() => _loadingPlans = false);
-      return;
-    }
-    try {
-      final res = await _api.getPhysioPatientExercisePlans(_patientId);
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : <String, dynamic>{};
-      final list = data['plans'] as List? ?? const [];
-      if (mounted) {
-        setState(() => _plans = list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
-      }
-    } catch (e) {
-      debugPrint('Exercise plans error: $e');
-    } finally {
-      if (mounted) setState(() => _loadingPlans = false);
-    }
-  }
-
-  Future<void> _createExercisePlan() async {
-    if (_patientId.isEmpty) return;
-    final created = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => PhysioExercisePlanEditor(
-        patientId: _patientId,
-        patientName: widget.patient['name']?.toString() ?? 'Patient',
-        appointmentId: _appointments.isNotEmpty ? _appointments.first['_id']?.toString() : null,
+  Future<void> _newAssessment(String name) async {
+    final active = ref.read(physioCoursesProvider).activeFor(_id);
+    await Navigator.of(context).push<bool>(
+      AppPageRoute(
+        builder: (_) => PhysioAssessmentEditor(
+          patientId: _id,
+          patientName: name,
+          courseId: active == null ? null : '${active['_id']}',
+        ),
       ),
-    ));
-    if (created == true) {
-      setState(() => _loadingPlans = true);
-      await _fetchExercisePlans();
-    }
+    );
   }
+
+  Future<void> _assignExercises(String name) async {
+    await Navigator.of(context).push(
+      AppPageRoute(
+        builder: (_) =>
+            PhysioExercisePlanEditor(patientId: _id, patientName: name),
+      ),
+    );
+    if (mounted) ref.invalidate(physioCarePlansProvider(_id));
+  }
+
+  Future<void> _openPlan(String planId) async {
+    if (planId.isEmpty) return;
+    await Navigator.of(context).push(
+      AppPageRoute(builder: (_) => PhysioExercisePlanDetail(planId: planId)),
+    );
+    if (mounted) ref.invalidate(physioCarePlansProvider(_id));
+  }
+
+  Future<void> _openSession(Map<String, dynamic> a) async {
+    await Navigator.of(context).push(
+      AppPageRoute(builder: (_) => PhysioAppointmentDetails(appointment: a)),
+    );
+    if (!mounted) return;
+    ref.invalidate(physioPatientSessionsProvider(_id));
+    ref.read(physioCoursesProvider.notifier).load(silent: true);
+  }
+
+  void _openAssessment(Map<String, dynamic> a, String name) {
+    final id = '${a['_id'] ?? ''}';
+    if (id.isEmpty) return;
+    Navigator.of(context).push(
+      AppPageRoute(
+        builder: (_) => PhysioAssessmentDetail(
+          assessmentId: id,
+          patientId: _id,
+          patientName: name,
+          assessment: a,
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────── Build ───────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final patient = widget.patient;
-    final name = patient['name'] ?? 'Unknown Patient';
-    final email = patient['email'] ?? 'No email';
-    final phone = patient['phone'] ?? 'No phone';
-    final age = patient['age']?.toString() ?? '--';
-    final gender = patient['gender'] ?? '--';
-    
-    final chronicList = patient['chronicConditions'] as List? ?? [];
-    final chronicConditions = chronicList.isEmpty ? 'No significant history' : chronicList.join(', ');
-    
-    final totalVisits = patient['totalVisits']?.toString() ?? _appointments.length.toString();
-    final activeTreatments = _plans.where((p) => p['status'] == 'active').length.toString();
-
+    final accent = ModuleAccent.of(context).color;
+    final courses = ref.watch(physioCoursesProvider);
+    final patient = _patient(courses);
+    final name = _nameOf(patient);
     return Scaffold(
-      backgroundColor: AppTheme.surface,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 220,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: const BoxDecoration(gradient: AppTheme.physioGradient),
-                child: SafeArea(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 20),
-                      Container(
-                        width: 80, height: 80,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20)]
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _topBar(),
+            Expanded(
+              child: RefreshIndicator(
+                color: accent,
+                onRefresh: _refresh,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+                  children: [
+                    AppEntrance(child: _profile(patient, name)),
+                    const SizedBox(height: 18),
+                    _Segmented(
+                      value: _tab,
+                      onChanged: (t) => setState(() => _tab = t),
+                    ),
+                    const SizedBox(height: 18),
+                    if (_id.isEmpty)
+                      const AppErrorBanner(
+                        message: 'This patient record is missing its id.',
+                      )
+                    else
+                      AnimatedSwitcher(
+                        duration: AppMotion.fast,
+                        child: KeyedSubtree(
+                          key: ValueKey(_tab),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: switch (_tab) {
+                              _Tab.overview => _overview(
+                                courses,
+                                patient,
+                                name,
+                              ),
+                              _Tab.sessions => _sessions(patient),
+                              _Tab.exercises => _exercises(name),
+                              _Tab.progress => _progress(name),
+                            },
+                          ),
                         ),
-                        child: Center(child: Text(name[0].toUpperCase(), style: GoogleFonts.manrope(fontSize: 32, fontWeight: FontWeight.w800, color: AppTheme.physioAccent))),
                       ),
-                      const SizedBox(height: 12),
-                      Text(name, style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
-                      Text(phone, style: GoogleFonts.manrope(fontSize: 14, color: Colors.white70)),
-                    ],
-                  ),
+                  ],
                 ),
               ),
             ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Stat Cards
-                  Row(
-                    children: [
-                      _statCard('Total Visits', totalVisits, CupertinoIcons.calendar_badge_plus),
-                      const SizedBox(width: 12),
-                      _statCard('Active Plans', activeTreatments, CupertinoIcons.waveform_path),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
-
-                  // Medical Profile
-                  _sectionHeader('Medical Profile', Icons.badge_outlined),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.border)),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            _medicalItem('Age', age),
-                            _medicalItem('Gender', gender),
-                            _medicalItem('Blood Group', patient['bloodGroup'] ?? '--'),
-                          ],
-                        ),
-                        const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1)),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            _medicalItem('Height', '${patient['height'] ?? '--'} cm'),
-                            _medicalItem('Weight', '${patient['weight'] ?? '--'} kg'),
-                            _medicalItem('BMI', _calcBMI(patient['weight'], patient['height'])),
-                          ],
-                        ),
-                        const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1)),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Conditions', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary)),
-                            const SizedBox(height: 4),
-                            Text(chronicConditions, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _sectionHeader('Exercise Plans', CupertinoIcons.waveform_path),
-                      TextButton.icon(
-                        onPressed: _createExercisePlan,
-                        icon: const Icon(CupertinoIcons.add, size: 17),
-                        label: const Text('New Plan'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  if (_loadingPlans)
-                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: AppTheme.physioAccent)))
-                  else if (_plans.isEmpty)
-                    _emptyState('No exercise plan assigned yet')
-                  else
-                    ..._plans.map(_buildExercisePlanCard),
-                  const SizedBox(height: 28),
-
-                  // History Timeline
-                  _sectionHeader('Session Timeline', CupertinoIcons.timer),
-                  const SizedBox(height: 12),
-                  if (_loadingApts)
-                    const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: AppTheme.physioAccent)))
-                  else if (_appointments.isEmpty)
-                    _emptyState('No previous sessions found')
-                  else
-                    ..._appointments.map((a) => _buildTimelineItem(a)),
-                  
-                  const SizedBox(height: 40),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _sectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: AppTheme.physioAccent),
-        const SizedBox(width: 8),
-        Text(title, style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-      ],
-    );
-  }
-
-  Widget _statCard(String label, String value, IconData icon) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.border)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: AppTheme.physioAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 20, color: AppTheme.physioAccent)),
-            const SizedBox(height: 12),
-            Text(label, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
-            Text(value, style: GoogleFonts.manrope(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.physioAccent)),
           ],
         ),
       ),
     );
   }
 
-  Widget _medicalItem(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _topBar() => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 4, 20, 4),
+    child: Row(
       children: [
-        Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textTertiary)),
-        const SizedBox(height: 2),
-        Text(value, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+        IconButton(
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(
+            LucideIcons.chevronLeft,
+            size: 22,
+            color: AppColors.textPrimary,
+          ),
+          tooltip: 'Back',
+        ),
+        Text(
+          'Patient',
+          style: AppType.sans(
+            fontSize: AppType.body,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _profile(Map<String, dynamic> p, String name) {
+    final accent = ModuleAccent.of(context);
+    final meta = patientMeta(p);
+    final phone = '${p['phone'] ?? ''}'.trim();
+    return Row(
+      children: [
+        DoctorAvatar(name: name, size: 56),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppType.sans(
+                  fontSize: AppType.heading,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: AppColors.textStrong,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                [
+                  if (meta.isNotEmpty) meta,
+                  phone.isNotEmpty ? phone : 'No phone on file',
+                ].join('  ·  '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppType.sans(
+                  fontSize: AppType.small,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (phone.isNotEmpty) ...[
+          const SizedBox(width: 10),
+          AppPressable(
+            onTap: () => _call(phone),
+            semanticLabel: 'Call $name',
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: accent.light,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(LucideIcons.phone, size: 18, color: accent.color),
+            ),
+          ),
+        ],
       ],
     );
   }
 
-  Widget _buildExercisePlanCard(Map<String, dynamic> plan) {
-    final exercises = plan['exercises'] as List? ?? const [];
-    final status = (plan['status'] ?? 'active').toString();
-    final statusColor = status == 'completed' ? AppTheme.success : status == 'cancelled' ? AppTheme.textTertiary : AppTheme.physioAccent;
-    return InkWell(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PhysioExercisePlanDetail(planId: plan['_id'].toString()),
-      )).then((_) => _fetchExercisePlans()),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-        child: Row(children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: statusColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(12)),
-            child: Icon(CupertinoIcons.waveform_path, color: statusColor),
+  /// Skeleton / error banner / content for one async section.
+  List<Widget> _async<T>(
+    AsyncValue<T> async,
+    List<Widget> Function(T data) data, {
+    required String error,
+    required VoidCallback retry,
+    int skeleton = 3,
+  }) {
+    if (async.hasValue) {
+      return [
+        if (async.hasError) ...[
+          AppErrorBanner(
+            message: doctorError(async.error!, fallback: error),
+            onRetry: retry,
           ),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(plan['title'] ?? 'Exercise plan', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-            const SizedBox(height: 3),
-            Text('${exercises.length} exercises • ${status.toUpperCase()}', style: GoogleFonts.manrope(fontSize: 12, color: statusColor)),
-          ])),
-          const Icon(CupertinoIcons.chevron_right, size: 18, color: AppTheme.textTertiary),
-        ]),
-      ),
-    );
+          const SizedBox(height: 10),
+        ],
+        ...data(async.requireValue),
+      ];
+    }
+    if (async.hasError) {
+      return [
+        AppErrorBanner(
+          message: doctorError(async.error!, fallback: error),
+          onRetry: retry,
+        ),
+      ];
+    }
+    return [AppListSkeleton(count: skeleton)];
   }
 
-  Widget _buildTimelineItem(Map<String, dynamic> apt) {
-    final date = DateTime.tryParse(apt['appointmentDate']?.toString() ?? '') ?? DateTime.now();
-    final status = apt['status']?.toString().toUpperCase() ?? 'PENDING';
-    final type = apt['type']?.toString().toUpperCase() ?? 'CLINIC';
+  // ─────────────────────────── Overview ───────────────────────────
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-      child: Row(
+  List<Widget> _overview(
+    PhysioCoursesState courses,
+    Map<String, dynamic> patient,
+    String name,
+  ) {
+    final active = courses.activeFor(_id);
+    final past = courses
+        .forPatient(_id)
+        .where((c) => courseStatus(c) != 'active')
+        .toList();
+    final sessions = ref.watch(physioPatientSessionsProvider(_id));
+    final progress = ref.watch(physioProgressProvider(_id));
+    final next = sessions.valueOrNull == null
+        ? null
+        : _nextSession(sessions.requireValue);
+
+    return [
+      AppSectionTitle(
+        'Treatment course',
+        action: active == null && courses.hasLoaded ? 'Start a course' : null,
+        onAction: () => _startCourse(patient),
+      ),
+      if (!courses.hasLoaded && courses.error != null)
+        AppErrorBanner(
+          message: courses.error!,
+          onRetry: () => ref.read(physioCoursesProvider.notifier).load(),
+        )
+      else if (!courses.hasLoaded)
+        const AppListSkeleton(count: 1)
+      else if (active != null)
+        AppEntrance(index: 1, child: PhysioCourseCard(course: active))
+      else
+        AppEmptyState(
+          icon: LucideIcons.layers,
+          text: 'No active course. Sell a package or set sessions and price.',
+          action: AppButton(
+            label: 'Start a course',
+            icon: LucideIcons.plus,
+            fullWidth: false,
+            compact: true,
+            onPressed: () => _startCourse(patient),
+          ),
+        ),
+      if (next != null) ...[
+        const SizedBox(height: 10),
+        _NextSessionRow(
+          appointment: next,
+          onTap: () => _openSession({...next, 'patientId': patient}),
+        ),
+      ],
+      const SizedBox(height: 22),
+      const AppSectionTitle('Pain'),
+      ..._async(
+        progress,
+        (p) => [_painSummary(p, name)],
+        error: 'Couldn’t load progress.',
+        retry: () => ref.invalidate(physioProgressProvider(_id)),
+        skeleton: 1,
+      ),
+      const SizedBox(height: 22),
+      const AppSectionTitle('Quick actions'),
+      AppGroup(
         children: [
-          Column(
+          _ActionRow(
+            icon: LucideIcons.clipboardPlus,
+            title: 'New assessment',
+            subtitle: 'Pain, range of motion, strength, outcome scores',
+            onTap: () => _newAssessment(name),
+          ),
+          const AppHairline(),
+          _ActionRow(
+            icon: LucideIcons.dumbbell,
+            title: 'Assign exercises',
+            subtitle: 'Home programme with sets, reps and hold',
+            onTap: () => _assignExercises(name),
+          ),
+        ],
+      ),
+      if (past.isNotEmpty) ...[
+        const SizedBox(height: 22),
+        const AppSectionTitle('Past courses'),
+        AppGroup(
+          children: [
+            for (var i = 0; i < past.length; i++) ...[
+              if (i > 0) const AppHairline(),
+              PhysioPastCourseRow(course: past[i]),
+            ],
+          ],
+        ),
+      ],
+    ];
+  }
+
+  Map<String, dynamic>? _nextSession(List<Map<String, dynamic>> list) {
+    final now = DateTime.now();
+    Map<String, dynamic>? best;
+    DateTime? bestAt;
+    for (final a in list) {
+      final s = apptStart(a);
+      if (s == null || s.isBefore(now)) continue;
+      if (!const {
+        'pending',
+        'confirmed',
+        'rescheduled',
+      }.contains(apptStatus(a))) {
+        continue;
+      }
+      if (bestAt == null || s.isBefore(bestAt)) {
+        best = a;
+        bestAt = s;
+      }
+    }
+    return best;
+  }
+
+  Widget _painSummary(Map<String, dynamic> progress, String name) {
+    final pain = (progress['pain'] is List ? progress['pain'] as List : [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    if (pain.isEmpty) {
+      return AppEmptyState(
+        icon: LucideIcons.activity,
+        text: 'No pain score yet. Record an assessment to start tracking.',
+        action: AppSecondaryButton(
+          label: 'Record assessment',
+          icon: LucideIcons.clipboardPlus,
+          fullWidth: false,
+          onPressed: () => _newAssessment(name),
+        ),
+      );
+    }
+    final lastDate = parseDate(pain.last['date']);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(DateFormat('dd').format(date), style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-              Text(DateFormat('MMM').format(date).toUpperCase(), style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.physioAccent)),
+              Expanded(child: _painFigure(pain, 'activity', 'With activity')),
+              Container(width: 1, height: 44, color: AppColors.bg),
+              const SizedBox(width: 16),
+              Expanded(child: _painFigure(pain, 'rest', 'At rest')),
             ],
           ),
-          const SizedBox(width: 16),
-          const VerticalDivider(width: 1, thickness: 1),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(type, style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textTertiary)),
-                    const SizedBox(width: 8),
-                    Container(width: 4, height: 4, decoration: const BoxDecoration(color: AppTheme.border, shape: BoxShape.circle)),
-                    const SizedBox(width: 8),
-                    Text(status, style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w700, color: status == 'COMPLETED' ? AppTheme.success : AppTheme.warning)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(apt['therapyType'] ?? 'Physiotherapy Session', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                Text('${apt['startTime']} - ${apt['endTime']}', style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textSecondary)),
-              ],
+          const SizedBox(height: 8),
+          Text(
+            'Latest ${_date(lastDate)} · ${pain.length} '
+            '${pain.length == 1 ? 'assessment' : 'assessments'}',
+            style: AppType.sans(
+              fontSize: AppType.caption,
+              color: AppColors.textTertiary,
             ),
-          ),
-          IconButton(
-            onPressed: () => _openAptChat(apt),
-            icon: const Icon(CupertinoIcons.chat_bubble_2, color: AppTheme.physioAccent, size: 22),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _openAptChat(Map<String, dynamic> apt) async {
-    final patientId = widget.patient['_id'] ?? widget.patient['patientId']?['_id'] ?? '';
-    final name = widget.patient['name'] ?? 'Patient';
-    final profile = ref.read(physioDashboardProvider).profile;
-    final profId = profile['_id'];
-
-    if (patientId.isEmpty || profId == null) return;
-
-    try {
-      final res = await _api.getOrCreateChatSession({
-        'patientId': patientId,
-        'appointmentId': apt['_id'], // Pass the specific appointment ID
-      });
-
-      if (res.data['success']) {
-        final session = res.data['session'];
-        if (mounted) {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => AppChatScreen(
-              sessionId: session['_id'],
-              patientName: name,
-              patientId: patientId,
-              professionalId: profId,
-              professionalType: 'physio',
+  Widget _painFigure(List<Map<String, dynamic>> pain, String key, String l) {
+    final values = [
+      for (final p in pain)
+        if (p[key] is num) p[key] as num,
+    ];
+    final latest = values.isEmpty ? null : values.last;
+    final prev = values.length > 1 ? values[values.length - 2] : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l,
+          style: AppType.sans(
+            fontSize: AppType.caption,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              latest == null ? '—' : '${latest.round()}',
+              style: AppType.number(
+                fontSize: AppType.display,
+                fontWeight: FontWeight.w700,
+                color: latest == null
+                    ? AppColors.textTertiary
+                    : painColor(context, latest),
+              ),
             ),
-          ));
-        }
-      }
-    } catch (e) {
-      debugPrint('Chat error: $e');
-    }
-  }
-
-  Widget _emptyState(String text) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
-      child: Column(children: [
-        Icon(CupertinoIcons.folder_open, size: 40, color: AppTheme.textTertiary.withValues(alpha: 0.3)),
-        const SizedBox(height: 12),
-        Text(text, style: GoogleFonts.manrope(color: AppTheme.textTertiary, fontSize: 13)),
-      ]),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 3),
+              child: Text(
+                '/10',
+                style: AppType.sans(
+                  fontSize: AppType.small,
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (latest != null && prev != null)
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 5),
+                  child: PhysioChangeChip(
+                    change: latest - prev,
+                    lowerIsBetter: true,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
-  String _calcBMI(dynamic w, dynamic h) {
-    if (w is num && h is num && h > 0) {
-      final bmi = w / ((h / 100) * (h / 100));
-      return bmi.toStringAsFixed(1);
-    }
-    return '--';
+  // ─────────────────────────── Sessions ───────────────────────────
+
+  List<Widget> _sessions(Map<String, dynamic> patient) {
+    final async = ref.watch(physioPatientSessionsProvider(_id));
+    return _async(
+      async,
+      (list) => [
+        AppSectionTitle(
+          list.isEmpty
+              ? 'Sessions'
+              : '${list.length} ${list.length == 1 ? 'session' : 'sessions'}',
+        ),
+        if (list.isEmpty)
+          const AppEmptyState(
+            icon: LucideIcons.calendarX,
+            text: 'No sessions with you yet.',
+          )
+        else
+          for (var i = 0; i < list.length; i++)
+            AppEntrance(
+              index: i,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DoctorAppointmentCard(
+                  appointment: {...list[i], 'patientId': patient},
+                  showDay: true,
+                  onTap: () => _openSession({...list[i], 'patientId': patient}),
+                ),
+              ),
+            ),
+      ],
+      error: 'Couldn’t load sessions.',
+      retry: () => ref.invalidate(physioPatientSessionsProvider(_id)),
+      skeleton: 4,
+    );
+  }
+
+  // ─────────────────────────── Exercises ───────────────────────────
+
+  List<Widget> _exercises(String name) {
+    final async = ref.watch(physioCarePlansProvider(_id));
+    return [
+      AppSectionTitle(
+        'Exercise plans',
+        action: 'New plan',
+        onAction: () => _assignExercises(name),
+      ),
+      ..._async(
+        async,
+        (plans) => [
+          if (plans.isEmpty)
+            AppEmptyState(
+              icon: LucideIcons.dumbbell,
+              text:
+                  'No exercise plan yet. Give a home programme to follow '
+                  'between sessions.',
+              action: AppButton(
+                label: 'New plan',
+                icon: LucideIcons.plus,
+                fullWidth: false,
+                compact: true,
+                onPressed: () => _assignExercises(name),
+              ),
+            )
+          else
+            AppEntrance(
+              child: AppGroup(
+                children: [
+                  for (var i = 0; i < plans.length; i++) ...[
+                    if (i > 0) const AppHairline(),
+                    _PlanRow(
+                      plan: plans[i],
+                      onTap: () => _openPlan(plans[i].id),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+        error: 'Couldn’t load exercise plans.',
+        retry: () => ref.invalidate(physioCarePlansProvider(_id)),
+      ),
+    ];
+  }
+
+  // ─────────────────────────── Progress ───────────────────────────
+
+  List<Widget> _progress(String name) {
+    final progress = ref.watch(physioProgressProvider(_id));
+    final assessments = ref.watch(physioAssessmentsProvider(_id));
+    return [
+      ..._async(
+        progress,
+        (p) => _progressBody(p, name),
+        error: 'Couldn’t load progress.',
+        retry: () => ref.invalidate(physioProgressProvider(_id)),
+      ),
+      const SizedBox(height: 22),
+      AppSectionTitle(
+        'Assessments',
+        action: 'New',
+        onAction: () => _newAssessment(name),
+      ),
+      ..._async(
+        assessments,
+        (list) => [
+          if (list.isEmpty)
+            AppEmptyState(
+              icon: LucideIcons.clipboardList,
+              text:
+                  'No assessments yet. An initial assessment sets the '
+                  'baseline for progress.',
+              action: AppButton(
+                label: 'New assessment',
+                icon: LucideIcons.plus,
+                fullWidth: false,
+                compact: true,
+                onPressed: () => _newAssessment(name),
+              ),
+            )
+          else
+            AppGroup(
+              children: [
+                for (var i = 0; i < list.length; i++) ...[
+                  if (i > 0) const AppHairline(),
+                  _AssessmentRow(
+                    assessment: list[i],
+                    onTap: () => _openAssessment(list[i], name),
+                  ),
+                ],
+              ],
+            ),
+        ],
+        error: 'Couldn’t load assessments.',
+        retry: () => ref.invalidate(physioAssessmentsProvider(_id)),
+      ),
+    ];
+  }
+
+  List<Widget> _progressBody(Map<String, dynamic> p, String name) {
+    final pain = (p['pain'] is List ? p['pain'] as List : const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    final om = p['outcomeMeasures'] is Map
+        ? Map<String, dynamic>.from(p['outcomeMeasures'])
+        : <String, dynamic>{};
+    final rom = p['rom'] is Map
+        ? Map<String, dynamic>.from(p['rom'])
+        : <String, dynamic>{};
+    final count = num.tryParse('${p['assessmentCount'] ?? ''}')?.round() ?? 0;
+    if (count == 0) return const [];
+    return [
+      if (pain.isNotEmpty) ...[
+        const AppSectionTitle('Pain over time'),
+        AppEntrance(child: PhysioPainChart(points: pain)),
+        const SizedBox(height: 22),
+      ],
+      if (om.isNotEmpty) ...[
+        const AppSectionTitle('Outcome measures'),
+        for (final e in om.entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: PhysioOutcomeCard(
+              code: e.key,
+              series: (e.value is List ? e.value as List : const [])
+                  .whereType<Map>()
+                  .map((m) => Map<String, dynamic>.from(m))
+                  .toList(),
+            ),
+          ),
+        const SizedBox(height: 14),
+      ],
+      if (rom.isNotEmpty) ...[
+        const AppSectionTitle('Range of motion'),
+        PhysioRomTable(rom: rom),
+      ],
+    ];
+  }
+}
+
+// ─────────────────────────── Pieces ───────────────────────────
+
+class _Segmented extends StatelessWidget {
+  final _Tab value;
+  final ValueChanged<_Tab> onChanged;
+  const _Segmented({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    const tabs = _Tab.values;
+    final i = tabs.indexOf(value);
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: AppMotion.medium,
+            curve: AppMotion.enter,
+            alignment: Alignment(-1 + i * 2 / (tabs.length - 1), 0),
+            child: FractionallySizedBox(
+              widthFactor: 1 / tabs.length,
+              heightFactor: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.bg,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x14000000), blurRadius: 4),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (final t in tabs)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: t == value,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onChanged(t),
+                      child: Center(
+                        child: Text(
+                          switch (t) {
+                            _Tab.overview => 'Overview',
+                            _Tab.sessions => 'Sessions',
+                            _Tab.exercises => 'Exercises',
+                            _Tab.progress => 'Progress',
+                          },
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppType.sans(
+                            fontSize: AppType.small,
+                            fontWeight: t == value
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: t == value
+                                ? AppColors.textStrong
+                                : AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+  const _ActionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context).color;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: accent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppType.sans(
+                      fontSize: AppType.body,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.sans(
+                      fontSize: AppType.caption,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              LucideIcons.chevronRight,
+              size: 16,
+              color: AppColors.textDisabled,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NextSessionRow extends StatelessWidget {
+  final Map<String, dynamic> appointment;
+  final VoidCallback onTap;
+  const _NextSessionRow({required this.appointment, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context);
+    final start = apptStart(appointment);
+    final pending = apptStatus(appointment) == 'pending';
+    return AppPressable(
+      scale: 0.985,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+        decoration: BoxDecoration(
+          color: accent.veryLight,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(LucideIcons.calendarClock, size: 16, color: accent.color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  text: 'Next session  ',
+                  style: AppType.sans(
+                    fontSize: AppType.small,
+                    color: AppColors.textSecondary,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: '${dayLabel(start)}, ${timeLabel(start)}',
+                      style: AppType.sans(
+                        fontSize: AppType.small,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textStrong,
+                      ),
+                    ),
+                    if (pending)
+                      TextSpan(
+                        text: '  · request',
+                        style: AppType.sans(
+                          fontSize: AppType.small,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.warning,
+                        ),
+                      ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(LucideIcons.chevronRight, size: 16, color: accent.color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanRow extends StatelessWidget {
+  final PhysioPlanSummary plan;
+  final VoidCallback onTap;
+  const _PlanRow({required this.plan, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ModuleAccent.of(context).color;
+    final p = plan;
+    final compliance = p.compliance;
+    final active = p.status == 'active';
+    final low = active && compliance != null && compliance < 50;
+    final created = parseDate(p.plan['startDate'] ?? p.plan['createdAt']);
+    return AppPressable(
+      scale: 0.985,
+      onTap: onTap,
+      child: Container(
+        color: Colors.transparent,
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          p.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppType.sans(
+                            fontSize: AppType.body,
+                            fontWeight: FontWeight.w700,
+                            color: active
+                                ? AppColors.textStrong
+                                : AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        capitalised(p.status),
+                        style: AppType.sans(
+                          fontSize: AppType.caption,
+                          fontWeight: FontWeight.w600,
+                          color: active ? accent : AppColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    [
+                      '${p.exerciseCount} ${p.exerciseCount == 1 ? 'exercise' : 'exercises'}',
+                      if (created != null && p.lastLogged == null)
+                        'from ${_date(created)}',
+                      p.lastLogged != null
+                          ? 'last done ${_date(p.lastLogged)}'
+                          : (active ? 'not logged yet' : null),
+                    ].whereType<String>().join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.sans(
+                      fontSize: AppType.caption,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (compliance != null) ...[
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$compliance%',
+                    style: AppType.number(
+                      fontSize: AppType.title,
+                      fontWeight: FontWeight.w700,
+                      color: low ? AppColors.warning : AppColors.textStrong,
+                    ),
+                  ),
+                  Text(
+                    'adherence',
+                    style: AppType.sans(
+                      fontSize: AppType.micro,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(width: 6),
+            const Icon(
+              LucideIcons.chevronRight,
+              size: 16,
+              color: AppColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssessmentRow extends StatelessWidget {
+  final Map<String, dynamic> assessment;
+  final VoidCallback onTap;
+  const _AssessmentRow({required this.assessment, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final a = assessment;
+    final date = parseDate(a['assessedAt'] ?? a['createdAt']);
+    final complaint = '${a['chiefComplaint'] ?? ''}'.trim();
+    final pain = a['painScore'] is Map ? a['painScore'] as Map : const {};
+    final rest = pain['rest'];
+    final activity = pain['activity'];
+    final painText = [
+      if (activity is num) 'activity ${activity.round()}',
+      if (rest is num) 'rest ${rest.round()}',
+    ].join(', ');
+    int len(String k) => a[k] is List ? (a[k] as List).length : 0;
+    final counts = [
+      if (len('rom') > 0) '${len('rom')} ROM',
+      if (len('outcomeMeasures') > 0)
+        '${len('outcomeMeasures')} ${len('outcomeMeasures') == 1 ? 'score' : 'scores'}',
+      if (len('specialTests') > 0)
+        '${len('specialTests')} ${len('specialTests') == 1 ? 'test' : 'tests'}',
+    ].join(' · ');
+
+    return AppPressable(
+      scale: 0.985,
+      onTap: onTap,
+      child: Container(
+        color: Colors.transparent,
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        assessmentTypeLabel('${a['type'] ?? ''}'),
+                        style: AppType.sans(
+                          fontSize: AppType.body,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textStrong,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _date(date),
+                        style: AppType.sans(
+                          fontSize: AppType.caption,
+                          color: AppColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (complaint.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      complaint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppType.sans(
+                        fontSize: AppType.small,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                  if (painText.isNotEmpty || counts.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (painText.isNotEmpty) 'Pain $painText',
+                        if (counts.isNotEmpty) counts,
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppType.sans(
+                        fontSize: AppType.caption,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(
+              LucideIcons.chevronRight,
+              size: 16,
+              color: AppColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

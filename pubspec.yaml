@@ -32,6 +32,7 @@ dependencies:
   url_launcher: ^6.3.2
   path_provider: ^2.1.5
   webview_flutter: ^4.13.1
+  permission_handler: ^11.3.1
   socket_io_client: ^3.1.4
   geolocator: ^13.0.2
   firebase_core:
@@ -39,6 +40,7 @@ dependencies:
   flutter_local_notifications:
   share_plus: ^12.0.2
   lucide_icons_flutter: ^3.1.19
+  mobile_scanner: ^7.4.2
 
 dev_dependencies:
   flutter_test:
@@ -51,6 +53,10 @@ flutter:
   assets:
     - assets/brand/
     - assets/banner.png
+    # Plus Jakarta Sans, bundled so text renders in the right face offline
+    # and on first launch; google_fonts picks these up by file name instead
+    # of downloading. Licence: assets/google_fonts/OFL.txt.
+    - assets/google_fonts/
 
 flutter_icons:
   android: true

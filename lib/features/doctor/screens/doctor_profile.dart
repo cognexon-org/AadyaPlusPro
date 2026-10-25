@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../auth/providers/auth_provider.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
-import 'doctor_availability.dart';
-import 'doctor_prescriptions.dart';
-import 'doctor_schedule.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../shared/ui/app_ui.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../notifications/screens/notification_screen.dart';
+import '../providers/doctor_profile_provider.dart';
+import '../widgets/availability_save_bar.dart';
+import '../widgets/doctor_ui.dart';
+import 'doctor_availability.dart';
+import 'doctor_edit_profile.dart';
+import 'doctor_practice_settings.dart';
+import 'doctor_prescriptions.dart';
+
+/// The doctor's Profile tab: who they are as patients see them, the
+/// practice tools, and account actions.
 class DoctorProfile extends ConsumerStatefulWidget {
   const DoctorProfile({super.key});
 
@@ -17,278 +24,454 @@ class DoctorProfile extends ConsumerStatefulWidget {
 }
 
 class _DoctorProfileState extends ConsumerState<DoctorProfile> {
+  /// Only read from build helpers, so watching here is safe.
+  Map<String, dynamic> get _profile =>
+      ref.watch(doctorProfileProvider.select((s) => s.profile));
+
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(doctorDashboardProvider.notifier).loadAll());
+    Future.microtask(() {
+      if (mounted) ref.read(doctorProfileProvider.notifier).ensureLoaded();
+    });
+  }
+
+  Future<void> _refresh() =>
+      ref.read(doctorProfileProvider.notifier).load(silent: true);
+
+  Future<void> _open(Widget page) async {
+    final changed = await Navigator.of(
+      context,
+    ).push<bool>(AppPageRoute(builder: (_) => page));
+    // Saves already update the provider; this just picks up anything the
+    // server derived from them.
+    if (changed == true && mounted) _refresh();
+  }
+
+  Future<void> _help() async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'support@aadyaplus.com',
+      queryParameters: {'subject': 'Help with my doctor account'},
+    );
+    var ok = false;
+    try {
+      ok = await launchUrl(uri);
+    } catch (_) {}
+    if (!ok && mounted) {
+      doctorToast(context, 'Email us at support@aadyaplus.com');
+    }
+  }
+
+  Future<void> _logout() async {
+    final ok = await AppModal.confirm(
+      context,
+      title: 'Log out?',
+      message:
+          'You will stop receiving appointment alerts on this phone until you log in again.',
+      icon: LucideIcons.logOut,
+      confirmLabel: 'Log out',
+    );
+    if (ok) ref.read(authProvider.notifier).logout();
   }
 
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
-    final dashData = ref.watch(doctorDashboardProvider);
-    final profile = dashData.profile;
-
-    // Extract profile data with fallbacks from user model
-    final name = profile['name'] ?? user?.name ?? 'Doctor';
-    final specialization = (profile['specialization'] is List && (profile['specialization'] as List).isNotEmpty)
-        ? (profile['specialization'] as List).join(', ')
-        : profile['specialization']?.toString() ?? 'General Physician';
-    final experience = profile['experienceYears']?.toString() ?? '0';
-    final license = profile['licenseNumber'] ?? 'N/A';
-    final consultFee = profile['consultationFee']?.toString() ?? '0';
-    final homeVisitFee = profile['homeVisitFee']?.toString() ?? '0';
-    final rating = profile['averageRating']?.toString() ?? '0.0';
-    final totalConsultations = profile['totalConsultations']?.toString() ?? '0';
-    final totalReviews = profile['totalReviews']?.toString() ?? '0';
-    final totalEarnings = profile['totalEarnings'] ?? 0;
-    final verificationStatus = profile['verificationStatus'] ?? 'pending';
-    final phone = profile['contactNumber'] ?? user?.phone ?? '';
-    final email = profile['email'] ?? user?.email ?? '';
-
-    final clinicAddress = profile['clinicAddress'];
-    final addressStr = clinicAddress is Map
-        ? '${clinicAddress['address'] ?? ''}\n${clinicAddress['city'] ?? ''}, ${clinicAddress['state'] ?? ''} - ${clinicAddress['pincode'] ?? ''}'
-        : 'Not set';
+    final st = ref.watch(doctorProfileProvider);
+    final profile = st.profile;
+    final firstLoad = profile.isEmpty && st.error == null;
 
     return Scaffold(
-      backgroundColor: AppTheme.surface,
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Profile header with gradient
-            Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(gradient: AppTheme.doctorGradient),
-              child: SafeArea(
-                bottom: false,
-                child: Column(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: ModuleAccent.of(context).color,
+          onRefresh: _refresh,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            children: [
+              const AppScreenHeader(
+                title: 'Profile',
+                subtitle: 'Your practice and account',
+              ),
+              const SizedBox(height: 18),
+              if (st.error != null)
+                AppErrorBanner(message: st.error!, onRetry: _refresh),
+              if (firstLoad)
+                const AppDetailSkeleton(rows: 4)
+              else
+                AppEntrance(
+                  child: _identity(
+                    name: '${profile['name'] ?? user?.name ?? ''}'.trim(),
+                  ),
+                ),
+              const SizedBox(height: 24),
+              const AppSectionTitle('Practice'),
+              AppEntrance(
+                index: 2,
+                child: AppGroup(
                   children: [
-                    const SizedBox(height: 16),
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 20)],
-                      ),
-                      child: Center(
-                        child: profile['profileImage'] != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(24),
-                                child: Image.network(profile['profileImage'], width: 90, height: 90, fit: BoxFit.cover,
-                                  errorBuilder: (_, e, s) => Text(name.substring(0, 1), style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
-                                ),
-                              )
-                            : Text(name.substring(0, 1), style: GoogleFonts.manrope(fontSize: 36, fontWeight: FontWeight.w700, color: AppTheme.primary)),
-                      ),
+                    _tile(
+                      LucideIcons.userPen,
+                      'Edit profile',
+                      'Name, specialisations, clinic and languages',
+                      () => _open(const DoctorEditProfile()),
                     ),
-                    const SizedBox(height: 12),
-                    Text(name, style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-                    const SizedBox(height: 4),
-                    Text('$specialization • $experience+ years', style: GoogleFonts.manrope(fontSize: 13, color: Colors.white70)),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                          child: Row(
-                            children: [
-                              const Icon(CupertinoIcons.star, size: 14, color: Colors.amber),
-                              const SizedBox(width: 4),
-                              Text(rating, style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: verificationStatus == 'approved' ? AppTheme.success.withValues(alpha: 0.2) : AppTheme.warning.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(verificationStatus == 'approved' ? CupertinoIcons.checkmark_seal_fill : CupertinoIcons.clock, size: 14, color: verificationStatus == 'approved' ? AppTheme.success : AppTheme.warning),
-                              const SizedBox(width: 4),
-                              Text(
-                                verificationStatus == 'approved' ? 'Verified' : 'Pending',
-                                style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    const AppHairline(),
+                    _tile(
+                      LucideIcons.slidersHorizontal,
+                      'Practice settings',
+                      'Visit types, fees and booking rules',
+                      () => _open(const DoctorPracticeSettings()),
                     ),
-                    const SizedBox(height: 20),
+                    const AppHairline(),
+                    _tile(
+                      LucideIcons.calendarClock,
+                      'Availability',
+                      'Your weekly hours',
+                      () => _open(const DoctorAvailability()),
+                    ),
+                    const AppHairline(),
+                    _tile(
+                      LucideIcons.fileText,
+                      'Prescriptions',
+                      'Prescriptions you have written',
+                      () => _open(const DoctorPrescriptions()),
+                    ),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(height: 24),
+              const AppSectionTitle('Account'),
+              AppEntrance(
+                index: 3,
+                child: AppGroup(
+                  children: [
+                    _tile(
+                      LucideIcons.bell,
+                      'Notifications',
+                      'Bookings, cancellations and updates',
+                      () => _open(
+                        ProfessionalNotificationScreen(
+                          accent: ModuleAccent.of(context).color,
+                        ),
+                      ),
+                    ),
+                    const AppHairline(),
+                    _tile(
+                      LucideIcons.lifeBuoy,
+                      'Help & support',
+                      'support@aadyaplus.com',
+                      _help,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 26),
+              AppEntrance(
+                index: 4,
+                child: AppSecondaryButton(
+                  label: 'Log out',
+                  icon: LucideIcons.logOut,
+                  color: AppColors.error,
+                  onPressed: _logout,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-            // Profile content
-            Padding(
-              padding: const EdgeInsets.all(20),
+  // ──────────────────────── Identity ──────────────────────────
+
+  Widget _identity({required String name}) {
+    final p = _profile;
+    final specs = p['specialization'] is List
+        ? (p['specialization'] as List)
+              .map((e) => '$e'.trim())
+              .where((e) => e.isNotEmpty)
+              .join(', ')
+        : '${p['specialization'] ?? ''}'.trim();
+    final years = int.tryParse('${p['experienceYears'] ?? ''}') ?? 0;
+    final subtitle = [
+      if (specs.isNotEmpty) specs,
+      if (years > 0) '$years ${years == 1 ? 'yr' : 'yrs'} experience',
+    ].join(' · ');
+
+    final accent = ModuleAccent.of(context).color;
+    final (
+      statusText,
+      statusTone,
+      statusIcon,
+    ) = switch ('${p['verificationStatus'] ?? ''}') {
+      'approved' => ('Verified', accent, LucideIcons.badgeCheck),
+      'rejected' || 'suspended' => (
+        'Action needed',
+        AppColors.error,
+        LucideIcons.circleAlert,
+      ),
+      'pending' => ('Under review', AppColors.warning, LucideIcons.hourglass),
+      _ => ('', AppColors.textSecondary, LucideIcons.circle),
+    };
+
+    final rating = num.tryParse('${p['averageRating'] ?? ''}') ?? 0;
+    final reviews = int.tryParse('${p['totalReviews'] ?? ''}') ?? 0;
+    final consults = int.tryParse('${p['totalConsultations'] ?? ''}') ?? 0;
+    final stats = [
+      if (rating > 0)
+        '${rating.toStringAsFixed(1)} rating${reviews > 0 ? ' ($reviews)' : ''}',
+      if (consults > 0)
+        '$consults ${consults == 1 ? 'consultation' : 'consultations'}',
+    ].join('  ·  ');
+
+    final address = p['clinicAddress'] is Map
+        ? Map<String, dynamic>.from(p['clinicAddress'] as Map)
+        : const <String, dynamic>{};
+    final clinic = [
+      '${p['clinicName'] ?? ''}'.trim(),
+      '${address['city'] ?? ''}'.trim(),
+    ].where((e) => e.isNotEmpty).join(', ');
+    final licence = '${p['licenseNumber'] ?? ''}'.trim();
+    final languages = p['languages'] is List
+        ? (p['languages'] as List)
+              .map((e) => '$e'.trim())
+              .where((e) => e.isNotEmpty)
+              .join(', ')
+        : '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DoctorAvatar(name: name, size: 56),
+            const SizedBox(width: 14),
+            Expanded(
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      _statBox('Consultations', totalConsultations),
-                      const SizedBox(width: 12),
-                      _statBox('Reviews', totalReviews),
-                      const SizedBox(width: 12),
-                      _statBox('Earnings', _formatEarnings(totalEarnings)),
-                    ],
+                  Text(
+                    name.isEmpty ? 'Your name' : name,
+                    style: AppType.sans(
+                      fontSize: AppType.heading,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      color: AppColors.textStrong,
+                    ),
                   ),
-                  const SizedBox(height: 20),
-
-                  _infoSection('Contact', [
-                    _infoRow(CupertinoIcons.phone, 'Phone', phone.isNotEmpty ? phone : 'Not set'),
-                    _infoRow(CupertinoIcons.mail, 'Email', email.isNotEmpty ? email : 'Not set'),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  _infoSection('Professional', [
-                    _infoRow(CupertinoIcons.doc, 'License', license),
-                    _infoRow(CupertinoIcons.briefcase, 'Experience', '$experience years'),
-                    _infoRow(Icons.workspace_premium_outlined, 'Specialization', specialization),
-                    _infoRow(CupertinoIcons.money_dollar_circle, 'Consultation Fee', '₹$consultFee'),
-                    _infoRow(CupertinoIcons.house, 'Home Visit Fee', '₹$homeVisitFee'),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  _infoSection('Clinic Address', [
-                    _infoRow(CupertinoIcons.location, 'Address', addressStr),
-                  ]),
-                  const SizedBox(height: 20),
-
-                  _menuItem(CupertinoIcons.calendar_badge_plus, 'My Schedule', () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorSchedule()));
-                  }),
-                  _menuItem(CupertinoIcons.checkmark_shield, 'Set Availability', () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorAvailability()));
-                  }),
-                  _menuItem(CupertinoIcons.doc_text, 'Prescriptions', () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DoctorPrescriptions()));
-                  }),
-                  _menuItem(CupertinoIcons.chat_bubble_text, 'Help & Support', () {}),
-                  const SizedBox(height: 12),
-                  _menuItem(
-                    Icons.logout_outlined,
-                    'Sign Out',
-                    () async {
-                      await ref.read(authProvider.notifier).logout();
-                      if (mounted) {
-                        Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-                      }
-                    },
-                    isDestructive: true,
-                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: AppType.sans(
+                        fontSize: AppType.caption,
+                        height: 1.4,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (statusText.isNotEmpty || stats.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 10,
+                      runSpacing: 4,
+                      children: [
+                        if (statusText.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(statusIcon, size: 14, color: statusTone),
+                              const SizedBox(width: 5),
+                              Text(
+                                statusText,
+                                style: AppType.sans(
+                                  fontSize: AppType.caption,
+                                  fontWeight: FontWeight.w600,
+                                  color: statusTone,
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (stats.isNotEmpty)
+                          Text(
+                            stats,
+                            style: AppType.sans(
+                              fontSize: AppType.caption,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
+              ),
+            ),
+            AppPressable(
+              onTap: () => _open(const DoctorEditProfile()),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 0, 4),
+                child: Text(
+                  'Edit',
+                  style: AppType.sans(
+                    fontSize: AppType.body,
+                    fontWeight: FontWeight.w600,
+                    color: accent,
+                  ),
+                ),
               ),
             ),
           ],
         ),
-      ),
+        if (_statusNote() case final note?) ...[
+          const SizedBox(height: 14),
+          note,
+        ],
+        const SizedBox(height: 18),
+        AppGroup(
+          children: [
+            _dataRow(LucideIcons.fileBadge, 'Registration no.', licence),
+            const AppHairline(),
+            _dataRow(LucideIcons.building2, 'Clinic', clinic),
+            if (languages.isNotEmpty) ...[
+              const AppHairline(),
+              _dataRow(LucideIcons.languages, 'Languages', languages),
+            ],
+          ],
+        ),
+      ],
     );
   }
 
-  String _formatEarnings(dynamic value) {
-    if (value is num) {
-      if (value >= 100000) return '₹${(value / 100000).toStringAsFixed(1)}L';
-      if (value >= 1000) return '₹${(value / 1000).toStringAsFixed(1)}K';
-      return '₹$value';
-    }
-    return '₹0';
-  }
-
-  Widget _statBox(String label, String value) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-        child: Column(
-          children: [
-            Text(value, style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-            const SizedBox(height: 4),
-            Text(label, style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary)),
-          ],
+  /// One line on what verification means for bookings, only when it is not
+  /// yet done — a verified doctor doesn't need telling.
+  Widget? _statusNote() {
+    final status = '${_profile['verificationStatus'] ?? ''}';
+    final text = switch (status) {
+      'pending' =>
+        'Our team is checking your registration. Patients can book you once '
+            'you’re verified — set up your hours and fees in the meantime.',
+      'rejected' =>
+        'We couldn’t verify your registration. Check your details or contact '
+            'support to resubmit.',
+      'suspended' =>
+        'Your profile is suspended and hidden from patients. Contact support '
+            'to restore it.',
+      _ => null,
+    };
+    if (text == null) return null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        style: AppType.sans(
+          fontSize: AppType.caption,
+          height: 1.45,
+          color: AppColors.textSecondary,
         ),
       ),
     );
   }
 
-  Widget _infoSection(String title, List<Widget> children) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.border)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  /// A missing registration number or clinic says "Not set" in amber —
+  /// patients can't book a doctor without them.
+  Widget _dataRow(IconData icon, String label, String value) {
+    final missing = value.isEmpty;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
         children: [
-          Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-          const SizedBox(height: 12),
-          ...children,
+          Icon(icon, size: 18, color: AppColors.textHeading),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: AppType.sans(
+              fontSize: AppType.body,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              missing ? 'Not set' : value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: AppType.sans(
+                fontSize: AppType.body,
+                fontWeight: FontWeight.w600,
+                color: missing ? AppColors.warning : AppColors.textSecondary,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+  Widget _tile(
+    IconData icon,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) => AppPressable(
+    scale: 0.985,
+    onTap: onTap,
+    child: Container(
+      color: Colors.transparent,
+      padding: const EdgeInsets.fromLTRB(14, 12, 11, 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, size: 16, color: AppTheme.primary),
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 17, color: AppColors.textHeading),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: GoogleFonts.manrope(fontSize: 12, color: AppTheme.textTertiary)),
-                const SizedBox(height: 2),
-                Text(value, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
+                Text(
+                  title,
+                  style: AppType.sans(
+                    fontWeight: FontWeight.w600,
+                    fontSize: AppType.small,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: AppType.sans(
+                    fontSize: AppType.caption,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
               ],
             ),
+          ),
+          const Icon(
+            LucideIcons.chevronRight,
+            size: 15,
+            color: AppColors.textDisabled,
           ),
         ],
       ),
-    );
-  }
-
-  Widget _menuItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isDestructive ? AppTheme.error.withValues(alpha: 0.2) : AppTheme.border),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 20, color: isDestructive ? AppTheme.error : AppTheme.textSecondary),
-                const SizedBox(width: 14),
-                Expanded(child: Text(title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w500, color: isDestructive ? AppTheme.error : AppTheme.textPrimary))),
-                Icon(CupertinoIcons.chevron_right, size: 18, color: isDestructive ? AppTheme.error : AppTheme.textTertiary),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+    ),
+  );
 }

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/pharmacy_type.dart';
-import '../../../core/network/api_service.dart';
 import '../theme/pharmacy_colors.dart';
-import '../providers/pharmacy_store_provider.dart';
+import '../providers/pharmacy_orders_provider.dart';
 import '../widgets/pharmacy_ui.dart';
 import 'prescription_details_screen.dart';
 
@@ -15,137 +14,75 @@ class PrescriptionQueue extends ConsumerStatefulWidget {
 }
 
 class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
-  bool _loading = false;
-  List<Map<String, dynamic>> _orders = [];
-  String? _loadedStoreId;
-
   @override
   void initState() {
     super.initState();
-    Future.microtask(_load);
+    Future.microtask(() {
+      final cached = ref.read(pharmacyOrdersProvider).prescriptionQueue;
+      ref
+          .read(pharmacyOrdersProvider.notifier)
+          .loadPrescriptionQueue(silent: cached.isNotEmpty);
+    });
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load() => ref
+      .read(pharmacyOrdersProvider.notifier)
+      .loadPrescriptionQueue(force: true);
+
+  /// Approval happens on the details screen, where the scan and the
+  /// prescribed medicines are in front of the pharmacist — approving from a
+  /// list row meant signing off a prescription nobody had looked at.
+  Future<void> _open(Map<String, dynamic> order) async {
+    await Navigator.of(context).push(
+      PharmacyPageRoute(
+        builder: (_) => PrescriptionDetailsScreen(order: order),
+      ),
+    );
+    if (mounted) {
+      ref
+          .read(pharmacyOrdersProvider.notifier)
+          .loadPrescriptionQueue(silent: true);
+    }
+  }
+
+  /// Rejecting from the list stays available (a blurry or wrong upload is
+  /// obvious without opening it), but it is confirmed first: the server
+  /// cancels the whole order and refunds an online payment.
+  Future<void> _reject(Map<String, dynamic> order) async {
+    final id = '${order['_id'] ?? ''}';
+    final note = await showPharmacySheet<String>(
+      context,
+      builder: (_) => const _RejectReasonSheet(),
+    );
+    if (note == null || note.trim().isEmpty) return;
+    if (!mounted) return;
+    final paidOnline =
+        '${order['paymentMethod']}' == 'online' &&
+        '${order['paymentStatus']}' == 'paid';
+    final proceed = await PharmacyDialog.confirm(
+      context,
+      title: 'Reject and cancel this order?',
+      message: paidOnline
+          ? 'Rejecting the prescription cancels the order and refunds the customer’s online payment. This cannot be undone.'
+          : 'Rejecting the prescription cancels the whole order. This cannot be undone.',
+      confirmLabel: 'Reject & cancel',
+      cancelLabel: 'Keep',
+    );
+    if (!proceed) return;
     try {
-      await ref.read(pharmacyStoreProvider.notifier).initialize();
-      final r = await ApiService().getMerchantOrders(
-        queryParams: {'prescriptionStatus': 'pending_review', 'limit': 100},
-      );
-      final data = Map<String, dynamic>.from(r.data as Map);
-      final rows = (data['orders'] as List? ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      await ref
+          .read(pharmacyOrdersProvider.notifier)
+          .reviewPrescription(id, approved: false, reason: note);
       if (mounted) {
-        setState(() {
-          _loadedStoreId = ref.read(pharmacyStoreProvider).selectedStoreId;
-          _orders = rows.where((o) {
-            final rx = '${o['prescriptionStatus'] ?? o['rxStatus'] ?? ''}'
-                .toLowerCase();
-            return rx.contains('pending') ||
-                rx.contains('review') ||
-                o['prescriptionRequired'] == true;
-          }).toList();
-        });
-      }
-    } catch (e) {
-      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              pharmacyErrorMessage(
-                e,
-                fallback: 'Couldn\'t load the prescription queue.',
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
+          const SnackBar(
+            content: Text('Prescription rejected. Order cancelled.'),
             backgroundColor: PharmacyColors.error,
           ),
         );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _review(String id, bool approved) async {
-    String? note;
-    if (!approved) {
-      final reasonController = TextEditingController();
-      note = await showPharmacySheet<String>(
-        context,
-        builder: (ctx) => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Reject Prescription',
-              style: PharmacyType.sans(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: PharmacyColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Let the customer know why this was declined',
-              style: PharmacyType.sans(
-                fontSize: 12,
-                color: PharmacyColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            PharmacyTextField(
-              label: 'Reason',
-              controller: reasonController,
-              icon: CupertinoIcons.doc_text,
-              maxLines: 3,
-              required: true,
-              margin: EdgeInsets.zero,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: PharmacySecondaryButton(
-                    label: 'Cancel',
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: PharmacyButton(
-                    label: 'Reject',
-                    onPressed: () =>
-                        Navigator.pop(ctx, reasonController.text.trim()),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-      reasonController.dispose();
-      if (note == null || note.trim().isEmpty) return;
-    }
-    try {
-      await ApiService().reviewMerchantPrescription(
-        id,
-        approved: approved,
-        reason: note,
-      );
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              approved ? 'Prescription approved' : 'Prescription rejected',
-            ),
-            backgroundColor: PharmacyColors.success,
-          ),
-        );
-      await _load();
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -159,16 +96,16 @@ class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
             backgroundColor: PharmacyColors.error,
           ),
         );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final store = ref.watch(pharmacyStoreProvider);
-    if (store.selectedStoreId != null &&
-        store.selectedStoreId != _loadedStoreId &&
-        !_loading)
-      Future.microtask(_load);
+    final ordersState = ref.watch(pharmacyOrdersProvider);
+    final orders = ordersState.prescriptionQueue;
+    final isLoading = ordersState.isQueueLoading && orders.isEmpty;
+
     return Scaffold(
       backgroundColor: PharmacyColors.bg,
       appBar: AppBar(
@@ -177,9 +114,9 @@ class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
         surfaceTintColor: Colors.transparent,
         iconTheme: const IconThemeData(color: PharmacyColors.textPrimary),
         title: Text(
-          'Prescription Queue',
+          'Prescription queue',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: PharmacyColors.textPrimary,
           ),
@@ -190,7 +127,7 @@ class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
         // the bottom inset, so content and buttons clear the device
         // gesture bar.
         top: false,
-        child: _loading && _orders.isEmpty
+        child: isLoading
             ? ListView(
                 padding: const EdgeInsets.all(16),
                 children: const [PharmacyListSkeleton(count: 4)],
@@ -201,12 +138,13 @@ class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    if (_orders.isEmpty)
+                    if (orders.isEmpty)
                       const PharmacyEmptyStateInline(
-                        icon: CupertinoIcons.doc_text,
+                        icon: LucideIcons.fileText,
                         text: 'No prescriptions awaiting review.',
                       ),
-                    ..._orders.map((o) {
+                    ...orders.indexed.map((entry) {
+                      final (index, o) = entry;
                       final id = '${o['_id'] ?? ''}';
                       final items = (o['items'] as List? ?? const []);
                       final number =
@@ -214,97 +152,184 @@ class _PrescriptionQueueState extends ConsumerState<PrescriptionQueue> {
                       final patient = o['patientId'] is Map
                           ? Map<String, dynamic>.from(o['patientId'])
                           : <String, dynamic>{};
-                      return PharmacyCard(
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  PrescriptionDetailsScreen(order: o),
-                            ),
-                          );
-                          if (mounted) await _load();
-                        },
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '#$number',
-                                        style: PharmacyType.sans(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13.5,
-                                          color: PharmacyColors.textPrimary,
-                                        ),
-                                      ),
-                                      if ((patient['name'] ?? '')
-                                          .toString()
-                                          .isNotEmpty) ...[
-                                        const SizedBox(height: 2),
+                      return PharmacyEntrance(
+                        key: ValueKey('rx-${o['_id']}'),
+                        index: index,
+                        child: PharmacyCard(
+                          onTap: () => _open(o),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
                                         Text(
-                                          patient['name'].toString(),
+                                          '#$number',
                                           style: PharmacyType.sans(
-                                            fontSize: 12.5,
-                                            color: PharmacyColors.textSecondary,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                            color: PharmacyColors.textPrimary,
+                                          ),
+                                        ),
+                                        if ((patient['name'] ?? '')
+                                            .toString()
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            patient['name'].toString(),
+                                            style: PharmacyType.sans(
+                                              fontSize: 11.5,
+                                              color:
+                                                  PharmacyColors.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${items.length} ${items.length == 1 ? 'item' : 'items'} · ${pharmacyRupees(o['totalAmount'])}',
+                                          style: PharmacyType.sans(
+                                            fontSize: 11.5,
+                                            color: PharmacyColors.textTertiary,
                                           ),
                                         ),
                                       ],
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${items.length} item(s) · ₹${o['totalAmount'] ?? 0}',
-                                        style: PharmacyType.sans(
-                                          fontSize: 12,
-                                          color: PharmacyColors.textTertiary,
-                                        ),
-                                      ),
-                                    ],
+                                    ),
                                   ),
-                                ),
-                                PharmacyStatusPill(
-                                  text: 'Pending Review',
-                                  color:
-                                      PharmacyColors.statusPrescriptionReviewFg,
-                                  background:
-                                      PharmacyColors.statusPrescriptionReviewBg,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: PharmacySecondaryButton(
-                                    label: 'Reject',
-                                    color: PharmacyColors.error,
-                                    onPressed: id.isEmpty
-                                        ? null
-                                        : () => _review(id, false),
+                                  PharmacyStatusPill(
+                                    text: 'Pending Review',
+                                    color: PharmacyColors
+                                        .statusPrescriptionReviewFg,
+                                    background: PharmacyColors
+                                        .statusPrescriptionReviewBg,
                                   ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: PharmacyButton(
-                                    label: 'Approve',
-                                    onPressed: id.isEmpty
-                                        ? null
-                                        : () => _review(id, true),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: PharmacySecondaryButton(
+                                      label: 'Reject',
+                                      color: PharmacyColors.error,
+                                      onPressed: id.isEmpty
+                                          ? null
+                                          : () => _reject(o),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ],
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    flex: 2,
+                                    child: PharmacyButton(
+                                      label: 'Review & approve',
+                                      onPressed: id.isEmpty
+                                          ? null
+                                          : () => _open(o),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     }),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+}
+
+/// Asks why a prescription is being rejected.
+///
+/// Owns its controller so it is disposed only when the sheet is gone.
+/// Disposing it straight after `showPharmacySheet` returned crashed: the
+/// sheet is still animating closed (and rebuilding as the keyboard hides)
+/// when that future completes, and the TextField touched a dead controller.
+class _RejectReasonSheet extends StatefulWidget {
+  const _RejectReasonSheet();
+
+  @override
+  State<_RejectReasonSheet> createState() => _RejectReasonSheetState();
+}
+
+class _RejectReasonSheetState extends State<_RejectReasonSheet> {
+  final _reason = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _reason.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reason = _reason.text.trim();
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Reject prescription',
+            style: PharmacyType.sans(
+              fontSize: PharmacyType.title,
+              fontWeight: FontWeight.w700,
+              color: PharmacyColors.textStrong,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The customer sees this reason, and the order is cancelled.',
+            style: PharmacyType.sans(
+              fontSize: PharmacyType.caption,
+              color: PharmacyColors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          PharmacyTextField(
+            label: 'Reason',
+            controller: _reason,
+            icon: LucideIcons.fileText,
+            hint: 'e.g. Prescription is unclear or expired',
+            maxLines: 3,
+            required: true,
+            textCapitalization: TextCapitalization.sentences,
+            margin: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: PharmacySecondaryButton(
+                  label: 'Cancel',
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: PharmacyButton(
+                  label: 'Reject',
+                  onPressed: reason.isEmpty
+                      ? null
+                      : () => Navigator.pop(context, reason),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

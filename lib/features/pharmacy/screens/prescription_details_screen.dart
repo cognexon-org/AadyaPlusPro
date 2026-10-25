@@ -1,13 +1,16 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/network/api_service.dart';
+import '../providers/pharmacy_orders_provider.dart';
 import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
+import '../widgets/prescription_review.dart';
 
 /// Everything a pharmacist needs to decide on one prescription: who the
 /// patient is, who prescribed it, what was written, and the scan the patient
@@ -17,32 +20,46 @@ import '../widgets/pharmacy_ui.dart';
 /// always refetches the order by id, because the list endpoints do not carry
 /// the prescription body: only `GET /merchant/orders/:id` populates the
 /// issued prescription and its prescriber.
-class PrescriptionDetailsScreen extends StatefulWidget {
+class PrescriptionDetailsScreen extends ConsumerStatefulWidget {
   /// The order this prescription was attached to.
   final Map<String, dynamic> order;
 
   const PrescriptionDetailsScreen({super.key, required this.order});
 
   @override
-  State<PrescriptionDetailsScreen> createState() =>
+  ConsumerState<PrescriptionDetailsScreen> createState() =>
       _PrescriptionDetailsScreenState();
 }
 
-class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
-  final _api = ApiService();
+class _PrescriptionDetailsScreenState
+    extends ConsumerState<PrescriptionDetailsScreen> {
   final _note = TextEditingController();
 
   late Map<String, dynamic> _order = widget.order;
   Map<String, String> _imageHeaders = const {};
-  bool _loading = true;
+  bool _loading = false;
   bool _busy = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    final cached = ref.read(pharmacyOrdersProvider).orderDetailsCache[_id];
+    if (cached != null && cached.isNotEmpty) {
+      _order = cached;
+      _loading = false;
+    } else if (widget.order['items'] != null &&
+        (widget.order['items'] as List).isNotEmpty) {
+      _loading = false;
+    } else {
+      _loading = true;
+    }
     Future.microtask(() async {
-      _imageHeaders = await ApiService.authImageHeaders();
+      // setState so the scan rebuilds with the bearer token; assigned bare,
+      // the first paint requested the protected file without it.
+      final headers = await ApiService.authImageHeaders();
+      if (!mounted) return;
+      setState(() => _imageHeaders = headers);
       await _load();
     });
   }
@@ -75,26 +92,40 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
       });
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (_order.isEmpty || _order['items'] == null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
-      final res = await _api.getMerchantOrder(_id);
-      final data = res.data;
+      final updated = await ref
+          .read(pharmacyOrdersProvider.notifier)
+          .loadOrderDetails(_id, force: true);
       if (!mounted) return;
       setState(() {
-        if (data is Map && data['order'] is Map) {
-          _order = Map<String, dynamic>.from(data['order'] as Map);
+        if (updated != null) {
+          _order = updated;
         }
         _loading = false;
       });
-    } on DioException catch (e) {
+    } catch (e) {
       if (!mounted) return;
+      final message = e is DioException
+          ? _message(e)
+          : pharmacyErrorMessage(
+              e,
+              fallback: "Couldn't load this prescription.",
+            );
+      // Only replace the screen when there is nothing to show. If the list
+      // already handed over the order, keep it on screen — it is still
+      // reviewable — and just say the refresh failed.
+      final hasContent = _order['items'] is List;
       setState(() {
         _loading = false;
-        _error = _message(e);
+        if (!hasContent) _error = message;
       });
+      if (hasContent) _toast(message, PharmacyColors.error);
     }
   }
 
@@ -125,23 +156,37 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
       );
       if (!proceed || !mounted) return;
     }
+    Map<String, dynamic>? checklist;
+    if (approved) {
+      final doctor = _map(_rx['doctorId']);
+      final prescriber = doctor.isNotEmpty ? doctor : _map(_rx['physioId']);
+      checklist = await showPrescriptionChecklist(
+        context,
+        prescriberName: prescriber['name']?.toString(),
+        registration: prescriber['licenseNumber']?.toString(),
+        issuedOn: DateTime.tryParse('${_rx['issuedAt'] ?? ''}')?.toLocal(),
+      );
+      if (checklist == null || !mounted) return;
+    }
     setState(() => _busy = true);
     try {
-      final res = await _api.reviewMerchantPrescription(
-        _id,
-        approved: approved,
-        reason: note,
-      );
+      final updated = await ref
+          .read(pharmacyOrdersProvider.notifier)
+          .reviewPrescription(
+            _id,
+            approved: approved,
+            reason: note,
+            checklist: checklist,
+          );
       if (!mounted) return;
-      final data = res.data;
       setState(() {
-        if (data is Map && data['order'] is Map) {
-          _order = Map<String, dynamic>.from(data['order'] as Map);
+        if (updated != null) {
+          _order = updated;
         }
         _busy = false;
       });
       // Report what actually happened, not just that the call succeeded.
-      final refunded = data is Map && data['refund'] != null;
+      final refunded = updated != null && updated['refund'] != null;
       _toast(
         approved
             ? 'Prescription approved — the order can now be confirmed'
@@ -150,10 +195,15 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
             : 'Prescription rejected. Order cancelled.',
         approved ? PharmacyColors.success : PharmacyColors.error,
       );
-    } on DioException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      _toast(_message(e), PharmacyColors.error);
+      _toast(
+        e is DioException
+            ? _message(e)
+            : pharmacyErrorMessage(e, fallback: 'Something went wrong.'),
+        PharmacyColors.error,
+      );
     }
   }
 
@@ -165,7 +215,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
@@ -177,6 +227,10 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cached = ref.watch(pharmacyOrdersProvider).orderDetailsCache[_id];
+    if (cached != null) {
+      _order = cached;
+    }
     final medicines = _maps(_rx['medicines']);
 
     return Scaffold(
@@ -194,7 +248,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
             Text(
               'Prescription',
               style: PharmacyType.sans(
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: PharmacyColors.textStrong,
               ),
@@ -278,7 +332,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                                 child: Text(
                                   '${_order['prescriptionReviewNotes']}',
                                   style: PharmacyType.sans(
-                                    fontSize: 12,
+                                    fontSize: 11.5,
                                     height: 1.45,
                                     color: PharmacyColors.textSecondary,
                                   ),
@@ -388,7 +442,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
               child: Text(
                 display[0].toUpperCase(),
                 style: PharmacyType.sans(
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.greenDark,
                 ),
@@ -404,7 +458,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: PharmacyType.sans(
-                      fontSize: 14.5,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: PharmacyColors.textStrong,
                     ),
@@ -414,7 +468,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                     Text(
                       phone,
                       style: PharmacyType.number(
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         color: PharmacyColors.textSecondary,
                       ),
                     ),
@@ -514,7 +568,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: PharmacyType.sans(
-                      fontSize: 14.5,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: PharmacyColors.textStrong,
                     ),
@@ -566,57 +620,71 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
     final url = ApiConstants.prescriptionUploadFile(_uploadId);
     return _group([
       GestureDetector(
-        onTap: () => _openFullScreen(url),
+        onTap: () =>
+            openPrescriptionScan(context, url: url, headers: _imageHeaders),
         child: Container(
           height: 240,
           width: double.infinity,
           color: PharmacyColors.bgSecondary,
-          child: Image.network(
-            url,
-            headers: _imageHeaders,
-            fit: BoxFit.contain,
-            loadingBuilder: (_, child, progress) => progress == null
-                ? child
-                : const Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: PharmacyColors.green,
+          child: _imageHeaders.isEmpty
+              ? const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: PharmacyColors.green,
+                    ),
+                  ),
+                )
+              : Image.network(
+                  url,
+                  headers: _imageHeaders,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : const Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: PharmacyColors.green,
+                            ),
+                          ),
+                        ),
+                  errorBuilder: (_, _, _) => Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            LucideIcons.fileWarning,
+                            size: 22,
+                            color: PharmacyColors.textTertiary,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            // A PDF upload cannot render in an Image widget, and a
+                            // missing file gives the same failure — say both.
+                            'This file could not be previewed. It may be a PDF, or missing from storage.',
+                            textAlign: TextAlign.center,
+                            style: PharmacyType.sans(
+                              fontSize: 11.5,
+                              height: 1.4,
+                              color: PharmacyColors.textTertiary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-            errorBuilder: (_, _, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      LucideIcons.fileWarning,
-                      size: 22,
-                      color: PharmacyColors.textTertiary,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      // A PDF upload cannot render in an Image widget, and a
-                      // missing file gives the same failure — say both.
-                      'This file could not be previewed. It may be a PDF, or missing from storage.',
-                      textAlign: TextAlign.center,
-                      style: PharmacyType.sans(
-                        fontSize: 11.5,
-                        height: 1.4,
-                        color: PharmacyColors.textTertiary,
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ),
-          ),
         ),
       ),
+      _hairline,
+      _dataRow('Tap the scan', 'Zoom & rotate'),
       _hairline,
       _dataRow('File', '${_upload['originalName'] ?? 'Prescription'}'),
       if (_date(_upload['createdAt']) != null) ...[
@@ -624,28 +692,6 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
         _dataRow('Uploaded', _date(_upload['createdAt'])!),
       ],
     ]);
-  }
-
-  void _openFullScreen(String url) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            elevation: 0,
-            iconTheme: const IconThemeData(color: Colors.white),
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              minScale: 0.8,
-              maxScale: 5,
-              child: Image.network(url, headers: _imageHeaders),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _medicinesGroup(List<Map<String, dynamic>> medicines) {
@@ -706,7 +752,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                     Text(
                       '${m['medicineName'] ?? m['genericName'] ?? 'Medicine'}',
                       style: PharmacyType.sans(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: PharmacyColors.textPrimary,
                       ),
@@ -726,7 +772,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                       Text(
                         instructions,
                         style: PharmacyType.sans(
-                          fontSize: 11,
+                          fontSize: 11.5,
                           height: 1.4,
                           color: PharmacyColors.textTertiary,
                         ),
@@ -740,7 +786,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                 Text(
                   '×$qty',
                   style: PharmacyType.number(
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                     color: PharmacyColors.textStrong,
                   ),
@@ -827,7 +873,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
               child: Text(
                 notes[i],
                 style: PharmacyType.sans(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   height: 1.45,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -860,7 +906,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
           child: Text(
             'No items on this order',
             style: PharmacyType.sans(
-              fontSize: 12,
+              fontSize: 11.5,
               color: PharmacyColors.textTertiary,
             ),
           ),
@@ -885,7 +931,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: PharmacyType.sans(
-                          fontSize: 12.5,
+                          fontSize: 11.5,
                           fontWeight: FontWeight.w600,
                           color: PharmacyColors.textPrimary,
                         ),
@@ -905,7 +951,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
                         child: Text(
                           'Rx',
                           style: PharmacyType.sans(
-                            fontSize: 9,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.w800,
                             color: PharmacyColors.warning,
                           ),
@@ -919,7 +965,7 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
               Text(
                 '×${_num(item['quantity']).toInt()}',
                 style: PharmacyType.number(
-                  fontSize: 12.5,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.textStrong,
                 ),
@@ -934,35 +980,13 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
 
   // ────────────────────────── Shared chrome ────────────────────────
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 
-  Widget _group(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
+  Widget _group(List<Widget> children) => PharmacyGroup(children: children);
 
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
+  static Widget get _hairline => const PharmacyHairline();
 
   Widget _dataRow(String label, String value) => Container(
-    color: PharmacyColors.bg,
     padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
     child: Row(
       children: [
@@ -970,20 +994,21 @@ class _PrescriptionDetailsScreenState extends State<PrescriptionDetailsScreen> {
           child: Text(
             label,
             style: PharmacyType.sans(
-              fontSize: 12.5,
+              fontSize: 11.5,
               color: PharmacyColors.textSecondary,
             ),
           ),
         ),
         const SizedBox(width: 10),
-        Flexible(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 190),
           child: Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.right,
             style: PharmacyType.number(
-              fontSize: 12.5,
+              fontSize: 11.5,
               fontWeight: FontWeight.w700,
               color: PharmacyColors.textStrong,
             ),

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../../core/network/api_service.dart';
 
 import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
@@ -51,7 +54,7 @@ class _OrderRejectReasonSheetState extends State<OrderRejectReasonSheet> {
         Text(
           'Why are you rejecting?',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w700,
             color: PharmacyColors.textStrong,
           ),
@@ -118,44 +121,41 @@ class _OrderRejectReasonSheetState extends State<OrderRejectReasonSheet> {
 
   Widget _option(String code, String label) {
     final selected = _selected == code;
-    return Material(
-      color: selected ? PharmacyColors.errorBg : PharmacyColors.bg,
-      borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-        onTap: () => setState(() => _selected = code),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-            border: Border.all(
-              color: selected
-                  ? PharmacyColors.error
-                  : PharmacyColors.borderStrong,
-            ),
+    // Selected reads as an ink outline and check on the grey panel, not a
+    // red fill — the consequence is spelled out in the confirm dialog.
+    return PharmacyPressable(
+      scale: 0.98,
+      onTap: () => setState(() => _selected = code),
+      child: AnimatedContainer(
+        duration: PharmacyMotion.fast,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: PharmacyColors.panel,
+          borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
+          border: Border.all(
+            width: 1.5,
+            color: selected ? PharmacyColors.textStrong : PharmacyColors.panel,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: PharmacyType.sans(
-                    fontSize: 13,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? PharmacyColors.error
-                        : PharmacyColors.textPrimary,
-                  ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: PharmacyType.sans(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: PharmacyColors.textPrimary,
                 ),
               ),
-              if (selected)
-                const Icon(
-                  LucideIcons.check,
-                  size: 16,
-                  color: PharmacyColors.error,
-                ),
-            ],
-          ),
+            ),
+            if (selected)
+              const Icon(
+                LucideIcons.check,
+                size: 16,
+                color: PharmacyColors.textStrong,
+              ),
+          ],
         ),
       ),
     );
@@ -164,9 +164,21 @@ class _OrderRejectReasonSheetState extends State<OrderRejectReasonSheet> {
 
 /// Per-line "how many can you actually supply". Starts at the ordered
 /// quantity so a full acceptance needs no adjustment at all.
+///
+/// With [orderId] it also asks the server what is in stock, warns on a line
+/// the shelf cannot cover, and lists same-salt alternatives for it.
 class OrderAvailabilitySheet extends StatefulWidget {
   final List<Map<String, dynamic>> items;
-  const OrderAvailabilitySheet({super.key, required this.items});
+  final String? orderId;
+
+  /// Offered as "Call customer" next to alternatives — a swap needs their OK.
+  final String? customerPhone;
+  const OrderAvailabilitySheet({
+    super.key,
+    required this.items,
+    this.orderId,
+    this.customerPhone,
+  });
 
   @override
   State<OrderAvailabilitySheet> createState() => _OrderAvailabilitySheetState();
@@ -188,6 +200,52 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
 
   bool get _allZero => _supplied.values.every((v) => v == 0);
 
+  /// medicineId -> {available, alternatives[]} from /substitutes.
+  Map<String, Map<String, dynamic>> _stock = const {};
+  final Set<String> _expanded = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStock();
+  }
+
+  Future<void> _loadStock() async {
+    final id = widget.orderId;
+    if (id == null || id.isEmpty) return;
+    try {
+      final res = await ApiService().getOrderSubstitutes(id);
+      final list = res.data is Map ? (res.data as Map)['items'] : null;
+      if (list is! List || !mounted) return;
+      final stock = <String, Map<String, dynamic>>{
+        for (final e in list.whereType<Map>())
+          '${e['medicineId']}': Map<String, dynamic>.from(e),
+      };
+      setState(() {
+        _stock = stock;
+        // Start each line at what the shelf can actually cover, so the
+        // pharmacist confirms the shortfall rather than discovering it as
+        // a stock error after tapping Accept.
+        for (final item in widget.items) {
+          final s = stock['${item['medicineId']}'];
+          final available = (num.tryParse('${s?['available']}') ?? -1).toInt();
+          final key = '${item['_id'] ?? ''}';
+          if (available >= 0 && available < (_supplied[key] ?? 0)) {
+            _supplied[key] = available;
+          }
+        }
+      });
+    } catch (_) {
+      // Stock hints are a convenience; the sheet works without them.
+    }
+  }
+
+  Future<void> _callCustomer() async {
+    final phone = (widget.customerPhone ?? '').replaceAll(RegExp(r'\s'), '');
+    if (phone.isEmpty) return;
+    await launchUrl(Uri(scheme: 'tel', path: phone));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -197,7 +255,7 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
         Text(
           'What can you supply?',
           style: PharmacyType.sans(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w700,
             color: PharmacyColors.textStrong,
           ),
@@ -259,52 +317,193 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
     final ordered = _ordered(item);
     final supplied = _supplied[id] ?? ordered;
     final short = supplied < ordered;
+    final stock = _stock['${item['medicineId']}'];
+    final available = num.tryParse('${stock?['available']}')?.toInt();
+    final alternatives = ((stock?['alternatives'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    final lowStock = available != null && available < ordered;
+    final open = _expanded.contains(id);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
         decoration: BoxDecoration(
-          color: short ? PharmacyTileStyle.amber.surface : PharmacyColors.bg,
+          color: PharmacyColors.panel,
           borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
-          border: Border.all(
-            color: short
-                ? PharmacyTileStyle.amber.border
-                : PharmacyColors.borderStrong,
-          ),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${item['medicineName'] ?? 'Medicine'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: PharmacyType.sans(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: PharmacyColors.textPrimary,
-                    ),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${item['medicineName'] ?? 'Medicine'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: PharmacyType.sans(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: PharmacyColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        [
+                          short ? 'Ordered $ordered' : '$ordered ordered',
+                          if (available != null)
+                            available == 0
+                                ? 'none in stock'
+                                : '$available in stock',
+                        ].join(' · '),
+                        style: PharmacyType.sans(
+                          fontSize: 10.5,
+                          color: short || lowStock
+                              ? PharmacyColors.warning
+                              : PharmacyColors.textTertiary,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    short ? 'Ordered $ordered' : '$ordered ordered',
-                    style: PharmacyType.sans(
-                      fontSize: 10.5,
-                      color: short
-                          ? PharmacyColors.warning
-                          : PharmacyColors.textTertiary,
+                ),
+                _stepper(id, supplied, ordered),
+              ],
+            ),
+            if ((short || lowStock) && alternatives.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => setState(
+                  () => open ? _expanded.remove(id) : _expanded.add(id),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        LucideIcons.arrowLeftRight,
+                        size: 13,
+                        color: PharmacyColors.greenDark,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${alternatives.length} same-salt alternative${alternatives.length == 1 ? '' : 's'} in stock',
+                        style: PharmacyType.sans(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: PharmacyColors.greenDark,
+                        ),
+                      ),
+                      Icon(
+                        open ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                        size: 14,
+                        color: PharmacyColors.greenDark,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (open) ...[
+                for (final alt in alternatives) _alternative(alt),
+                const SizedBox(height: 4),
+                Text(
+                  'A swap needs the customer\'s OK and isn\'t added to this order. '
+                  'Agree it on a call; accept what you can supply here.',
+                  style: PharmacyType.sans(
+                    fontSize: 10.5,
+                    height: 1.4,
+                    color: PharmacyColors.textTertiary,
+                  ),
+                ),
+                if ((widget.customerPhone ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _callCustomer,
+                      style: TextButton.styleFrom(
+                        foregroundColor: PharmacyColors.greenDark,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: const Icon(LucideIcons.phone, size: 14),
+                      label: Text(
+                        'Call customer',
+                        style: PharmacyType.sans(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ),
-            _stepper(id, supplied, ordered),
+              ],
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _alternative(Map<String, dynamic> alt) {
+    final notes = [
+      if ('${alt['strength'] ?? ''}'.isNotEmpty) '${alt['strength']}',
+      '${alt['available']} in stock',
+      pharmacyRupees(alt['sellingPrice']),
+    ].join(' · ');
+    final differs = alt['sameStrength'] == false
+        ? 'Different strength'
+        : alt['sameForm'] == false
+        ? 'Different form'
+        : null;
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: PharmacyColors.bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${alt['medicineName'] ?? 'Medicine'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: PharmacyType.sans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: PharmacyColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  notes,
+                  style: PharmacyType.sans(
+                    fontSize: 10.5,
+                    color: PharmacyColors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (differs != null)
+            Text(
+              differs,
+              style: PharmacyType.sans(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: PharmacyColors.warning,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -324,7 +523,7 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
           '$supplied',
           textAlign: TextAlign.center,
           style: PharmacyType.number(
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: FontWeight.w800,
             color: PharmacyColors.textStrong,
           ),
@@ -340,9 +539,7 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
   );
 
   Widget _stepButton(IconData icon, VoidCallback? onTap) => Material(
-    color: onTap == null
-        ? PharmacyColors.bgSecondary
-        : PharmacyColors.greenVeryLight,
+    color: PharmacyColors.bg,
     shape: const CircleBorder(),
     child: InkWell(
       customBorder: const CircleBorder(),
@@ -355,7 +552,7 @@ class _OrderAvailabilitySheetState extends State<OrderAvailabilitySheet> {
           size: 15,
           color: onTap == null
               ? PharmacyColors.textDisabled
-              : PharmacyColors.greenDark,
+              : PharmacyColors.textStrong,
         ),
       ),
     ),

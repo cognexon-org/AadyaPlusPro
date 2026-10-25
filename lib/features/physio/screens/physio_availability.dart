@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/app_dialog.dart';
-import '../../dashboard/providers/dashboard_provider.dart';
-import '../../../core/network/api_service.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../shared/ui/app_ui.dart';
+import '../../doctor/widgets/availability_day_sheet.dart';
+import '../../doctor/widgets/availability_model.dart';
+import '../../doctor/widgets/availability_save_bar.dart';
+import '../../doctor/widgets/doctor_ui.dart';
+import '../providers/physio_profile_provider.dart';
+
+/// The physio's weekly hours — the one place to set when patients can book.
+/// Same editor as the doctor's.
+///
+/// There is no GET availability endpoint for a physio: the week comes from
+/// the profile (GET /physio/me/profile) and is saved whole with
+/// PUT /physio/me/availability.
 class PhysioAvailability extends ConsumerStatefulWidget {
   const PhysioAvailability({super.key});
 
@@ -15,358 +23,361 @@ class PhysioAvailability extends ConsumerStatefulWidget {
 }
 
 class _PhysioAvailabilityState extends ConsumerState<PhysioAvailability> {
-  final List<String> _days = [
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-    'sunday',
-  ];
-  Map<String, List<Map<String, dynamic>>> _availability = {};
-  bool _isSaving = false;
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  Map<String, AvailabilityDay> _initial = parseWeek(null);
+  Map<String, AvailabilityDay> _week = parseWeek(null);
+
+  /// Types switched on in practice settings; null if unknown.
+  Set<String>? _enabledTypes;
+  int? _slotMinutes;
+
+  bool get _dirty => !_loading && _error == null && !sameWeek(_initial, _week);
 
   @override
   void initState() {
     super.initState();
-    _loadAvailability();
+    // After the first frame's build: loading updates the provider.
+    Future.microtask(_load);
   }
 
-  void _loadAvailability() {
-    final profile = ref.read(physioDashboardProvider).profile;
-    final availList = profile['availability'] as List?;
-    _availability = {};
-    for (final day in _days) {
-      _availability[day] = [];
+  Future<void> _load({bool force = false}) async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final notifier = ref.read(physioProfileProvider.notifier);
+    await (force ? notifier.load(silent: true) : notifier.ensureLoaded());
+    if (!mounted) return;
+    final st = ref.read(physioProfileProvider);
+    // A failed refresh keeps the last good profile; only a profile that was
+    // never read blocks the grid.
+    if (!st.hasLoaded || st.profile.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = st.error ?? "Couldn't load your hours.";
+      });
+      return;
     }
+    final p = st.profile;
+    final week = parseWeek(p['availability']);
+    setState(() {
+      _initial = week;
+      _week = week;
+      _enabledTypes = {
+        if (p['clinicConsultationEnabled'] != false) 'clinic',
+        if (_typeOn(p, 'homeVisitEnabled', 'homeVisitFee')) 'home',
+        if (_typeOn(p, 'teleconsultationEnabled', 'videoCallFee')) 'video',
+      };
+      _slotMinutes = int.tryParse('${p['slotDurationMinutes'] ?? ''}');
+      _loading = false;
+    });
+  }
 
-    if (availList != null) {
-      for (final item in availList) {
-        final day = item['day']?.toString().toLowerCase();
-        if (day != null && _availability.containsKey(day)) {
-          _availability[day] = List<Map<String, dynamic>>.from(
-            item['slots'] ?? [],
-          );
-        }
-      }
+  /// The server's rule: on when switched on, or never set but priced.
+  static bool _typeOn(Map<String, dynamic> p, String flag, String fee) {
+    final v = p[flag];
+    return v == true ||
+        (v == null && (num.tryParse('${p[fee] ?? ''}') ?? 0) > 0);
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await ref
+          .read(physioProfileProvider.notifier)
+          .saveAvailability(weekToJson(_week));
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _initial = _week;
+      });
+      doctorToast(context, 'Hours saved');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      doctorToast(
+        context,
+        doctorError(e, fallback: "Couldn't save your hours."),
+        error: true,
+      );
     }
+  }
+
+  Future<void> _editDay(String day) async {
+    final current = _week[day] ?? const AvailabilityDay();
+    final result = await showAvailabilityDaySheet(
+      context,
+      day: day,
+      blocks: current.blocks,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _week = {
+        ..._week,
+        day: AvailabilityDay(enabled: result.isNotEmpty, blocks: result),
+      };
+    });
+  }
+
+  void _toggleDay(String day, bool on) {
+    final current = _week[day] ?? const AvailabilityDay();
+    // Turning on a day with nothing in it: ask for the hours rather than
+    // switching on an empty day that patients still can't book.
+    if (on && current.blocks.isEmpty) {
+      _editDay(day);
+      return;
+    }
+    setState(() => _week = {..._week, day: current.copyWith(enabled: on)});
+  }
+
+  void _copyMonday() {
+    final monday = _week['monday'] ?? const AvailabilityDay();
+    if (!monday.isOpen) {
+      doctorToast(context, 'Set Monday’s hours first.');
+      return;
+    }
+    setState(() {
+      _week = {
+        ..._week,
+        for (final d in const ['tuesday', 'wednesday', 'thursday', 'friday'])
+          d: AvailabilityDay(enabled: true, blocks: [...monday.blocks]),
+      };
+    });
+    doctorToast(context, 'Monday’s hours copied to Tuesday – Friday');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: Text(
-          'Set Availability',
-          style: GoogleFonts.manrope(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-          ),
+    return DoctorDiscardGuard(
+      dirty: _dirty,
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        appBar: doctorSettingsAppBar('Availability'),
+        body: SafeArea(top: false, child: _body()),
+        bottomNavigationBar: doctorSaveBar(
+          dirty: _dirty,
+          saving: _saving,
+          onSave: _save,
+          label: 'Save hours',
         ),
-        centerTitle: true,
-        leading: IconButton(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(CupertinoIcons.back, color: AppTheme.textPrimary),
-        ),
-        actions: [
-          if (_isSaving)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppTheme.physioAccent,
-                  ),
-                ),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _saveAvailability,
-              child: Text(
-                'Save',
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.physioAccent,
-                ),
-              ),
-            ),
-        ],
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(20),
-        itemCount: _days.length,
-        itemBuilder: (c, i) => _dayCard(_days[i]),
       ),
     );
   }
 
-  Widget _dayCard(String day) {
-    final slots = _availability[day] ?? [];
+  Widget _body() {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: AppListSkeleton(count: 7),
+      );
+    }
+    if (_error != null) {
+      // No grid on a failed load: saving over hours we never read would
+      // wipe the physio's real week.
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          AppErrorBanner(message: _error!, onRetry: () => _load(force: true)),
+        ],
+      );
+    }
+    return RefreshIndicator(
+      color: ModuleAccent.of(context).color,
+      onRefresh: () async {
+        if (_dirty) return;
+        await _load(force: true);
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+        children: [
+          AppEntrance(child: _summary()),
+          ..._typeWarnings(),
+          const SizedBox(height: 22),
+          AppSectionTitle(
+            'Weekly hours',
+            action: 'Copy Monday to weekdays',
+            onAction: _copyMonday,
+          ),
+          AppEntrance(
+            index: 1,
+            child: AppGroup(
+              children: [
+                for (final d in kWeekDays) ...[
+                  if (d != kWeekDays.first) const AppHairline(),
+                  _dayRow(d),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Tap a day to change its hours. Changes apply to new bookings; '
+            'existing appointments stay as they are.',
+            style: AppType.sans(
+              fontSize: AppType.caption,
+              height: 1.45,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summary() {
+    final minutes = weeklyMinutes(_week);
+    final types = weeklyTypes(_week);
+    final openDays = kWeekDays.where((d) => _week[d]?.isOpen ?? false).length;
+    final detail = minutes == 0
+        ? 'Patients can’t book you until you add some hours.'
+        : [
+            '$openDays ${openDays == 1 ? 'day' : 'days'}',
+            '${types.length} visit ${types.length == 1 ? 'type' : 'types'}',
+            if (_slotMinutes != null) '$_slotMinutes-min slots',
+          ].join(' · ');
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  day[0].toUpperCase() + day.substring(1),
-                  style: GoogleFonts.manrope(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                  ),
+          Text(
+            minutes == 0 ? 'No hours set' : '${hoursLabel(minutes)} a week',
+            style: AppType.sans(
+              fontSize: AppType.figure,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+              color: minutes == 0 ? AppColors.warning : AppColors.textStrong,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            detail,
+            style: AppType.sans(
+              fontSize: AppType.caption,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A block for a type that is switched off in practice settings can never
+  /// be booked — say so instead of letting the physio wonder.
+  List<Widget> _typeWarnings() {
+    final enabled = _enabledTypes;
+    if (enabled == null) return const [];
+    final offered = <String>{
+      for (final b
+          in _week.values.where((d) => d.isOpen).expand((d) => d.blocks))
+        if (b.type != 'all') b.type,
+    };
+    final off = offered.where((t) => !enabled.contains(t)).toList();
+    if (off.isEmpty) return const [];
+    final names = off.map((t) => apptTypeInfo(t).label.toLowerCase()).toList();
+    final list = names.length == 1
+        ? names.first
+        : '${names.take(names.length - 1).join(', ')} and ${names.last}';
+    return [
+      const SizedBox(height: 10),
+      Container(
+        padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              LucideIcons.triangleAlert,
+              size: 15,
+              color: AppColors.warning,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                'Some hours are for $list, which is turned off in practice '
+                'settings, so patients can’t book them.',
+                style: AppType.sans(
+                  fontSize: AppType.caption,
+                  height: 1.45,
+                  color: AppColors.textSecondary,
                 ),
-                GestureDetector(
-                  onTap: () => _addSlot(day),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  Widget _dayRow(String day) {
+    final d = _week[day] ?? const AvailabilityDay();
+    final open = d.isOpen;
+    return AppPressable(
+      scale: 0.985,
+      onTap: () => _editDay(day),
+      child: Container(
+        color: Colors.transparent,
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    weekDayLabel(day),
+                    style: AppType.sans(
+                      fontSize: AppType.body,
+                      fontWeight: FontWeight.w600,
+                      color: open
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
                     ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.physioAccent.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          CupertinoIcons.add,
-                          size: 14,
-                          color: AppTheme.physioAccent,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Add Slot',
-                          style: GoogleFonts.manrope(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.physioAccent,
+                  ),
+                  const SizedBox(height: 3),
+                  if (!open)
+                    Text(
+                      d.blocks.isEmpty
+                          ? 'Closed'
+                          : 'Closed · ${d.blocks.length} '
+                                '${d.blocks.length == 1 ? 'block' : 'blocks'} kept',
+                      style: AppType.sans(
+                        fontSize: AppType.caption,
+                        color: AppColors.textTertiary,
+                      ),
+                    )
+                  else
+                    for (final b in d.blocks)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          blockLabel(b),
+                          style: AppType.sans(
+                            fontSize: AppType.caption,
+                            color: AppColors.textSecondary,
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (slots.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Text(
-                'No slots added - Unavailable',
-                style: GoogleFonts.manrope(
-                  fontSize: 12,
-                  color: AppTheme.textTertiary,
-                ),
-              ),
-            )
-          else
-            Column(
-              children: slots
-                  .asMap()
-                  .entries
-                  .map((entry) => _slotRow(day, entry.key, entry.value))
-                  .toList(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _slotRow(String day, int index, Map<String, dynamic> slot) {
-    final type = slot['type'] ?? 'clinic';
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            type == 'home' ? CupertinoIcons.house : Icons.apartment_outlined,
-            size: 16,
-            color: AppTheme.textSecondary,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '${slot['startTime']} - ${slot['endTime']}',
-              style: GoogleFonts.manrope(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                      ),
+                ],
               ),
             ),
-          ),
-          GestureDetector(
-            onTap: () => _removeSlot(day, index),
-            child: const Icon(
-              CupertinoIcons.trash,
-              size: 16,
-              color: AppTheme.error,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _addSlot(String day) async {
-    final TimeOfDay? start = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 9, minute: 0),
-    );
-    if (start == null) return;
-
-    final TimeOfDay? end = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: (start.hour + 1) % 24, minute: start.minute),
-    );
-    if (end == null) return;
-
-    Widget option(IconData icon, String label, String value) => Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => Navigator.pop(context, value),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppTheme.physioAccent.withValues(alpha: 0.10),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(icon, size: 15, color: AppTheme.physioAccent),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: GoogleFonts.manrope(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                const Icon(
-                  CupertinoIcons.chevron_right,
-                  size: 15,
-                  color: AppTheme.textTertiary,
-                ),
-              ],
-            ),
-          ),
+            AppSwitch(value: open, onChanged: (v) => _toggleDay(day, v)),
+          ],
         ),
       ),
     );
-
-    final type = await AppDialog.show<String>(
-      context,
-      title: 'Select Visit Type',
-      subtitle: 'How will this slot be delivered?',
-      icon: CupertinoIcons.location_solid,
-      accentColor: AppTheme.physioAccent,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          option(CupertinoIcons.building_2_fill, 'Clinic', 'clinic'),
-          option(CupertinoIcons.house_fill, 'Home Visit', 'home'),
-          option(
-            CupertinoIcons.arrow_2_squarepath,
-            'Both (Clinic & Home)',
-            'both',
-          ),
-        ],
-      ),
-    );
-
-    if (type != null) {
-      setState(() {
-        final st =
-            '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
-        final et =
-            '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-
-        if (type == 'both') {
-          _availability[day]!.add({
-            'startTime': st,
-            'endTime': et,
-            'type': 'clinic',
-          });
-          _availability[day]!.add({
-            'startTime': st,
-            'endTime': et,
-            'type': 'home',
-          });
-        } else {
-          _availability[day]!.add({
-            'startTime': st,
-            'endTime': et,
-            'type': type,
-          });
-        }
-      });
-    }
-  }
-
-  void _removeSlot(String day, int index) {
-    setState(() {
-      _availability[day]!.removeAt(index);
-    });
-  }
-
-  Future<void> _saveAvailability() async {
-    setState(() => _isSaving = true);
-    try {
-      final formatted = _availability.entries
-          .map((e) => {'day': e.key, 'slots': e.value})
-          .toList();
-
-      await ApiService().updatePhysioAvailability({'availability': formatted});
-      await ref.read(physioDashboardProvider.notifier).loadProfile();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Availability updated successfully')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    } finally {
-      setState(() => _isSaving = false);
-    }
   }
 }

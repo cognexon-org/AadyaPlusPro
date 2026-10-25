@@ -1,568 +1,290 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/network/api_service.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/app_dialog.dart';
+import '../../../shared/ui/app_ui.dart';
+import '../../doctor/widgets/doctor_ui.dart' show doctorError;
+import '../../doctor/widgets/prescription_ui.dart' show rxAppBar, RxQuickChip;
+import '../providers/physio_exercise_provider.dart';
+import '../widgets/exercise_detail_sheet.dart';
+import '../widgets/exercise_editor.dart';
+import '../widgets/exercise_ui.dart';
 
-class PhysioExercises extends StatefulWidget {
+/// The physio's exercise library: the exercises plans are built from, with
+/// pictures, videos, instructions and default dosing.
+class PhysioExercises extends ConsumerStatefulWidget {
   const PhysioExercises({super.key});
 
   @override
-  State<PhysioExercises> createState() => _PhysioExercisesState();
+  ConsumerState<PhysioExercises> createState() => _PhysioExercisesState();
 }
 
-class _PhysioExercisesState extends State<PhysioExercises> {
-  final ApiService _api = ApiService();
-  final TextEditingController _search = TextEditingController();
-  bool _loading = true;
-  String? _error;
-  List<Map<String, dynamic>> _items = [];
+class _PhysioExercisesState extends ConsumerState<PhysioExercises> {
+  final _search = TextEditingController();
+  Timer? _debounce;
+  String _query = '';
+  String? _bodyPart;
+  String? _category;
+  String? _difficulty;
+
+  PhysioExerciseCatalogNotifier get _catalog =>
+      ref.read(physioExerciseCatalogProvider.notifier);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    Future.microtask(() {
+      if (!mounted) return;
+      _catalog.load(silent: ref.read(physioExerciseCatalogProvider).hasLoaded);
+    });
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _search.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (mounted)
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    try {
-      final res = await _api.getPhysioExercises(
-        queryParams: _search.text.trim().isEmpty
-            ? null
-            : {'search': _search.text.trim()},
-      );
-      final data = res.data is Map
-          ? Map<String, dynamic>.from(res.data)
-          : <String, dynamic>{};
-      final list = data['exercises'] as List? ?? const [];
-      if (mounted) {
-        setState(() {
-          _items = list
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList();
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Could not load exercise library');
-    } finally {
-      if (mounted) setState(() => _loading = false);
+  void _onSearch(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      setState(() => _query = v.trim());
+      _catalog.search(v);
+    });
+  }
+
+  void _clearFilters() => setState(() {
+    _bodyPart = null;
+    _category = null;
+    _difficulty = null;
+  });
+
+  Future<void> _add() async {
+    final saved = await Navigator.of(context).push<Map<String, dynamic>>(
+      AppPageRoute(builder: (_) => const ExerciseEditorScreen()),
+    );
+    if (saved != null && mounted) _toast('${exName(saved)} added.');
+  }
+
+  Future<void> _edit(Map<String, dynamic> ex) async {
+    final saved = await Navigator.of(context).push<Map<String, dynamic>>(
+      AppPageRoute(builder: (_) => ExerciseEditorScreen(exercise: ex)),
+    );
+    if (saved != null && mounted) _toast('Changes saved.');
+  }
+
+  Future<void> _open(Map<String, dynamic> ex) async {
+    final action = await showExerciseDetailSheet(context, ex);
+    if (!mounted || action == null) return;
+    switch (action) {
+      case ExerciseSheetAction.edit:
+        await _edit(ex);
+      case ExerciseSheetAction.archive:
+        await _archive(ex);
     }
   }
 
-  Future<void> _openEditor([Map<String, dynamic>? current]) async {
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ExerciseEditor(exercise: current),
-    );
-    if (saved == true) await _load();
-  }
-
-  Future<void> _archive(Map<String, dynamic> item) async {
-    final ok = await AppDialog.confirm(
+  Future<void> _archive(Map<String, dynamic> ex) async {
+    final ok = await AppModal.confirm(
       context,
-      title: 'Archive exercise?',
+      title: 'Archive ${exName(ex)}?',
       message:
-          '${item['name'] ?? 'This exercise'} will no longer be available for new plans.',
-      icon: CupertinoIcons.archivebox,
+          'It leaves the library and can’t be added to new plans. Plans that already use it keep it.',
+      icon: LucideIcons.archive,
       confirmLabel: 'Archive',
-      destructive: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
-      await _api.deletePhysioExercise(item['_id'].toString());
-      await _load();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not archive exercise')),
-        );
-      }
+      await _catalog.archive(exId(ex));
+      if (mounted) _toast('${exName(ex)} archived.');
+    } catch (e) {
+      if (!mounted) return;
+      showAppError(
+        context,
+        null,
+        fallback: doctorError(e, fallback: 'Couldn’t archive the exercise.'),
+      );
     }
   }
+
+  void _toast(String text) => ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: AppColors.textStrong,
+      content: Text(
+        text,
+        style: AppType.sans(fontSize: AppType.caption, color: Colors.white),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(physioExerciseCatalogProvider);
+    final accent = ModuleAccent.of(context);
+    final all = state.items;
+    final loading = !state.hasLoaded && state.error == null;
+    final visible = state.filtered(
+      query: _query,
+      bodyPart: _bodyPart,
+      category: _category,
+      difficulty: _difficulty,
+    );
+    final filtering =
+        _bodyPart != null || _category != null || _difficulty != null;
+    final bodyParts = state.bodyParts;
+    final secondary = [
+      for (final c in state.categories) ('category', c, c),
+      for (final d in state.difficulties)
+        ('difficulty', d, exDifficultyLabel(d)),
+    ];
+
     return Scaffold(
-      backgroundColor: AppTheme.surface,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(CupertinoIcons.back, color: AppTheme.textPrimary),
-        ),
-        title: Text(
-          'Exercise Library',
-          style: GoogleFonts.manrope(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
-          ),
-        ),
+      backgroundColor: AppColors.bg,
+      appBar: rxAppBar(
+        context,
+        title: 'Exercise library',
+        subtitle: state.hasLoaded && all.isNotEmpty
+            ? '${all.length} exercise${all.length == 1 ? '' : 's'}'
+            : null,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openEditor(),
-        backgroundColor: AppTheme.physioAccent,
-        foregroundColor: Colors.white,
-        icon: const Icon(CupertinoIcons.add),
-        label: const Text('Exercise'),
+      floatingActionButton: AppFab(
+        label: 'Add exercise',
+        icon: LucideIcons.plus,
+        onPressed: _add,
       ),
       body: RefreshIndicator(
-        onRefresh: _load,
+        color: accent.color,
+        onRefresh: () => _catalog.load(silent: true),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
           children: [
-            TextField(
+            AppSearchField(
               controller: _search,
-              onSubmitted: (_) => _load(),
-              decoration: InputDecoration(
-                hintText: 'Search exercise, body part or category',
-                prefixIcon: const Icon(CupertinoIcons.search),
-                suffixIcon: IconButton(
-                  onPressed: _load,
-                  icon: const Icon(CupertinoIcons.chevron_right),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+              hint: 'Search exercises, body parts, equipment',
+              onChanged: _onSearch,
             ),
+            if (bodyParts.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _ChipRow(
+                children: [
+                  AppFilterChip(
+                    label: 'All',
+                    selected: _bodyPart == null,
+                    onTap: () => setState(() => _bodyPart = null),
+                  ),
+                  for (final b in bodyParts)
+                    AppFilterChip(
+                      label: b,
+                      selected: _bodyPart == b,
+                      onTap: () =>
+                          setState(() => _bodyPart = _bodyPart == b ? null : b),
+                    ),
+                ],
+              ),
+            ],
+            if (secondary.length > 1) ...[
+              const SizedBox(height: 8),
+              _ChipRow(
+                children: [
+                  for (final (kind, value, label) in secondary)
+                    RxQuickChip(
+                      label: label,
+                      selected: kind == 'category'
+                          ? _category == value
+                          : _difficulty == value,
+                      onTap: () => setState(() {
+                        if (kind == 'category') {
+                          _category = _category == value ? null : value;
+                        } else {
+                          _difficulty = _difficulty == value ? null : value;
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(48),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_error != null)
-              _messageCard(_error!, CupertinoIcons.exclamationmark_triangle)
-            else if (_items.isEmpty)
-              _messageCard(
-                'Your exercise library is empty. Create your first exercise to assign it to a patient.',
-                CupertinoIcons.waveform_path,
-              )
-            else
-              ..._items.map(_exerciseCard),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _exerciseCard(Map<String, dynamic> item) {
-    final instructions = item['instructions'] as List? ?? const [];
-    final meta = [
-      if ((item['bodyPart'] ?? '').toString().isNotEmpty)
-        item['bodyPart'].toString(),
-      if ((item['category'] ?? '').toString().isNotEmpty)
-        item['category'].toString(),
-      (item['difficulty'] ?? 'moderate').toString(),
-    ].join(' • ');
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppTheme.physioAccent.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  CupertinoIcons.waveform_path,
-                  color: AppTheme.physioAccent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item['name'] ?? 'Exercise',
-                      style: GoogleFonts.manrope(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    if (meta.isNotEmpty)
-                      Text(
-                        meta,
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) =>
-                    value == 'edit' ? _openEditor(item) : _archive(item),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  PopupMenuItem(value: 'archive', child: Text('Archive')),
-                ],
-              ),
-            ],
-          ),
-          if ((item['description'] ?? '').toString().isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              item['description'],
-              style: GoogleFonts.manrope(
-                fontSize: 13,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _chip('${item['defaultSets'] ?? 0} sets'),
-              _chip('${item['defaultReps'] ?? 0} reps'),
-              if ((item['defaultDurationSec'] ?? 0) > 0)
-                _chip('${item['defaultDurationSec']} sec'),
-              if ((item['defaultFrequency'] ?? '').toString().isNotEmpty)
-                _chip(item['defaultFrequency'].toString()),
-            ],
-          ),
-          if (instructions.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              '${instructions.length} instruction${instructions.length == 1 ? '' : 's'}',
-              style: GoogleFonts.manrope(
-                fontSize: 12,
-                color: AppTheme.textTertiary,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(String text) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-    decoration: BoxDecoration(
-      color: AppTheme.surface,
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Text(
-      text,
-      style: GoogleFonts.manrope(fontSize: 11, color: AppTheme.textSecondary),
-    ),
-  );
-
-  Widget _messageCard(String text, IconData icon) => Container(
-    padding: const EdgeInsets.all(28),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppTheme.border),
-    ),
-    child: Column(
-      children: [
-        Icon(icon, size: 34, color: AppTheme.textTertiary),
-        const SizedBox(height: 12),
-        Text(
-          text,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.manrope(
-            fontSize: 13,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _ExerciseEditor extends StatefulWidget {
-  final Map<String, dynamic>? exercise;
-  const _ExerciseEditor({this.exercise});
-
-  @override
-  State<_ExerciseEditor> createState() => _ExerciseEditorState();
-}
-
-class _ExerciseEditorState extends State<_ExerciseEditor> {
-  final ApiService _api = ApiService();
-  late final TextEditingController _name;
-  late final TextEditingController _description;
-  late final TextEditingController _category;
-  late final TextEditingController _bodyPart;
-  late final TextEditingController _sets;
-  late final TextEditingController _reps;
-  late final TextEditingController _duration;
-  late final TextEditingController _frequency;
-  late final TextEditingController _equipment;
-  late final TextEditingController _instructions;
-  late final TextEditingController _precautions;
-  String _difficulty = 'moderate';
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final x = widget.exercise ?? const <String, dynamic>{};
-    _name = TextEditingController(text: x['name']?.toString() ?? '');
-    _description = TextEditingController(
-      text: x['description']?.toString() ?? '',
-    );
-    _category = TextEditingController(text: x['category']?.toString() ?? '');
-    _bodyPart = TextEditingController(text: x['bodyPart']?.toString() ?? '');
-    _sets = TextEditingController(text: '${x['defaultSets'] ?? 0}');
-    _reps = TextEditingController(text: '${x['defaultReps'] ?? 0}');
-    _duration = TextEditingController(text: '${x['defaultDurationSec'] ?? 0}');
-    _frequency = TextEditingController(
-      text: x['defaultFrequency']?.toString() ?? '',
-    );
-    _equipment = TextEditingController(
-      text: (x['equipment'] as List? ?? const []).join(', '),
-    );
-    _instructions = TextEditingController(
-      text: (x['instructions'] as List? ?? const []).join('\n'),
-    );
-    _precautions = TextEditingController(
-      text: (x['precautions'] as List? ?? const []).join('\n'),
-    );
-    _difficulty = x['difficulty']?.toString() ?? 'moderate';
-  }
-
-  @override
-  void dispose() {
-    for (final c in [
-      _name,
-      _description,
-      _category,
-      _bodyPart,
-      _sets,
-      _reps,
-      _duration,
-      _frequency,
-      _equipment,
-      _instructions,
-      _precautions,
-    ]) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_name.text.trim().isEmpty || _saving) return;
-    setState(() => _saving = true);
-    final payload = {
-      'name': _name.text.trim(),
-      'description': _description.text.trim(),
-      'category': _category.text.trim(),
-      'bodyPart': _bodyPart.text.trim(),
-      'difficulty': _difficulty,
-      'defaultSets': int.tryParse(_sets.text) ?? 0,
-      'defaultReps': int.tryParse(_reps.text) ?? 0,
-      'defaultDurationSec': int.tryParse(_duration.text) ?? 0,
-      'defaultFrequency': _frequency.text.trim(),
-      'equipment': _equipment.text
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      'instructions': _instructions.text
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      'precautions': _precautions.text
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
-    };
-    try {
-      if (widget.exercise == null) {
-        await _api.createPhysioExercise(payload);
-      } else {
-        await _api.updatePhysioExercise(
-          widget.exercise!['_id'].toString(),
-          payload,
-        );
-      }
-      if (mounted) Navigator.pop(context, true);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save exercise')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.92,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.exercise == null
-                          ? 'New Exercise'
-                          : 'Edit Exercise',
-                      style: GoogleFonts.manrope(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                children: [
-                  _field(_name, 'Exercise name *'),
-                  _field(_description, 'Description', lines: 3),
-                  Row(
-                    children: [
-                      Expanded(child: _field(_category, 'Category')),
-                      const SizedBox(width: 12),
-                      Expanded(child: _field(_bodyPart, 'Body part')),
-                    ],
-                  ),
-                  DropdownButtonFormField<String>(
-                    value: _difficulty,
-                    decoration: const InputDecoration(labelText: 'Difficulty'),
-                    items: const [
-                      DropdownMenuItem(value: 'easy', child: Text('Easy')),
-                      DropdownMenuItem(
-                        value: 'moderate',
-                        child: Text('Moderate'),
-                      ),
-                      DropdownMenuItem(value: 'hard', child: Text('Hard')),
-                    ],
-                    onChanged: (v) =>
-                        setState(() => _difficulty = v ?? 'moderate'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _field(_sets, 'Default sets', number: true),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _field(_reps, 'Default reps', number: true),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _field(_duration, 'Seconds', number: true),
-                      ),
-                    ],
-                  ),
-                  _field(_frequency, 'Default frequency (e.g. 2x daily)'),
-                  _field(_equipment, 'Equipment (comma separated)'),
-                  _field(
-                    _instructions,
-                    'Instructions (one step per line)',
-                    lines: 5,
-                  ),
-                  _field(_precautions, 'Precautions (one per line)', lines: 4),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _saving ? null : _save,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.physioAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+            if (state.error != null)
+              AppErrorBanner(message: state.error!, onRetry: _catalog.load),
+            if (loading)
+              const AppListSkeleton(count: 6)
+            else if (visible.isEmpty && state.error == null)
+              AppEmptyState(
+                icon: LucideIcons.dumbbell,
+                text: all.isEmpty
+                    ? 'Your library is empty.\nAdd the exercises you prescribe most, with steps, a picture or video and default sets and reps.'
+                    : _query.isNotEmpty
+                    ? 'No exercises match “$_query”.'
+                    : 'No exercises match these filters.',
+                action: all.isNotEmpty && filtering
+                    ? TextButton(
+                        onPressed: _clearFilters,
+                        child: Text(
+                          'Clear filters',
+                          style: AppType.sans(
+                            fontSize: AppType.small,
+                            fontWeight: FontWeight.w600,
+                            color: accent.color,
                           ),
-                        )
-                      : const Text('Save exercise'),
+                        ),
+                      )
+                    : null,
+              )
+            else ...[
+              if (filtering || _query.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    '${visible.length} of ${all.length}',
+                    style: AppType.sans(
+                      fontSize: AppType.caption,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              for (final (i, ex) in visible.indexed)
+                Padding(
+                  key: ValueKey(exId(ex)),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: AppEntrance(
+                    index: i,
+                    child: ExerciseCard(
+                      exercise: ex,
+                      onTap: () => _open(ex),
+                      trailing: const Icon(
+                        LucideIcons.chevronRight,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _field(
-    TextEditingController c,
-    String label, {
-    int lines = 1,
-    bool number = false,
-  }) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: TextField(
-      controller: c,
-      maxLines: lines,
-      keyboardType: number ? TextInputType.number : TextInputType.text,
-      decoration: InputDecoration(
-        labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+class _ChipRow extends StatelessWidget {
+  final List<Widget> children;
+  const _ChipRow({required this.children});
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 34,
+    child: ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: children.length,
+      separatorBuilder: (_, _) => const SizedBox(width: 6),
+      itemBuilder: (_, i) => Center(child: children[i]),
     ),
   );
 }

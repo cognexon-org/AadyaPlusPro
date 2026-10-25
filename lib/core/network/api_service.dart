@@ -11,6 +11,22 @@ class ApiService {
 
   late final Dio _dio;
   UnauthorizedHandler? _onUnauthorized;
+
+  /// False after a request fails to reach the server at all (no connection,
+  /// timeout); true again on the next response of any kind. Reflects whether
+  /// the *server* is reachable, which is what matters — a phone can be on
+  /// Wi-Fi with no internet. Drives the offline banner.
+  static final ValueNotifier<bool> reachable = ValueNotifier<bool>(true);
+
+  static bool _isNetworkFailure(DioException e) =>
+      e.response == null &&
+      const {
+        DioExceptionType.connectionError,
+        DioExceptionType.connectionTimeout,
+        DioExceptionType.sendTimeout,
+        DioExceptionType.receiveTimeout,
+        DioExceptionType.unknown,
+      }.contains(e.type);
   bool _handlingUnauthorized = false;
   String? _pharmacyStoreId;
 
@@ -49,6 +65,7 @@ class ApiService {
           handler.next(options);
         },
         onResponse: (response, handler) {
+          reachable.value = true;
           if (kDebugMode) {
             debugPrint(
               '[API] ${response.statusCode} '
@@ -58,13 +75,28 @@ class ApiService {
           handler.next(response);
         },
         onError: (error, handler) async {
+          reachable.value = !_isNetworkFailure(error);
           if (kDebugMode) {
             debugPrint(
               '[API] ${error.response?.statusCode ?? '-'} '
               '${error.requestOptions.method} ${error.requestOptions.uri}',
             );
           }
-          if (error.response?.statusCode == 401 && !_handlingUnauthorized) {
+          // Only a signed-in call that's refused means the session ended.
+          // A request sent without a token (a poll finishing after sign-out)
+          // or a wrong password on the sign-in screen is not that.
+          final hadToken =
+              error.requestOptions.headers['Authorization'] != null;
+          final path = error.requestOptions.path;
+          final isAuthCall =
+              path.contains('/auth/login') ||
+              path.contains('/auth/register') ||
+              path.contains('/auth/otp') ||
+              path.contains('/auth/logout');
+          if (error.response?.statusCode == 401 &&
+              hadToken &&
+              !isAuthCall &&
+              !_handlingUnauthorized) {
             _handlingUnauthorized = true;
             try {
               await TokenStorage.clearAll();
@@ -166,6 +198,11 @@ class ApiService {
   Future<Response> updateAvailability(dynamic data) =>
       updateDoctorAvailability(data);
 
+  /// The signed-in doctor's own weekly hours plus practice settings —
+  /// works before verification, unlike the public availability endpoints.
+  Future<Response> getMyDoctorAvailability() =>
+      _dio.get(ApiConstants.doctorAvailability);
+
   // PHYSIO
   Future<Response> getPhysioProfile() => _dio.get(ApiConstants.physioProfile);
   Future<Response> updatePhysioProfile(Map<String, dynamic> data) =>
@@ -218,6 +255,66 @@ class ApiService {
   Future<Response> getPhysioExercisePlanProgress(String id) =>
       _dio.get(ApiConstants.physioExercisePlanProgress(id));
 
+  /// The physio logs a session done in clinic against a plan.
+  Future<Response> logPhysioExercisePlanProgress(
+    String id,
+    Map<String, dynamic> data,
+  ) => _dio.post(ApiConstants.physioExercisePlanProgress(id), data: data);
+
+  /// Prescribed vs done per exercise, overall compliance and pain averages.
+  Future<Response> getPhysioExercisePlanAdherence(
+    String id, {
+    Map<String, dynamic>? queryParams,
+  }) => _dio.get(
+    ApiConstants.physioExercisePlanAdherence(id),
+    queryParameters: queryParams,
+  );
+
+  // Physio care — packages, treatment courses, assessments.
+  Future<Response> getPhysioPackages({bool includeInactive = false}) =>
+      _dio.get(
+        ApiConstants.physioPackages,
+        queryParameters: {if (includeInactive) 'includeInactive': true},
+      );
+  Future<Response> createPhysioPackage(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.physioPackages, data: data);
+  Future<Response> updatePhysioPackage(String id, Map<String, dynamic> data) =>
+      _dio.patch(ApiConstants.physioPackage(id), data: data);
+  Future<Response> archivePhysioPackage(String id) =>
+      _dio.delete(ApiConstants.physioPackage(id));
+
+  Future<Response> getPhysioCourses({Map<String, dynamic>? queryParams}) =>
+      _dio.get(ApiConstants.physioCourses, queryParameters: queryParams);
+  Future<Response> createPhysioCourse(
+    String patientId,
+    Map<String, dynamic> data,
+  ) => _dio.post(ApiConstants.physioPatientCourses(patientId), data: data);
+  Future<Response> getPhysioCourse(String id) =>
+      _dio.get(ApiConstants.physioCourse(id));
+  Future<Response> updatePhysioCourse(String id, Map<String, dynamic> data) =>
+      _dio.patch(ApiConstants.physioCourse(id), data: data);
+  Future<Response> linkPhysioCourseAppointment(
+    String courseId,
+    String appointmentId,
+  ) => _dio.post(
+    ApiConstants.physioCourseLinkAppointment(courseId, appointmentId),
+  );
+
+  Future<Response> getPhysioAssessments(String patientId) =>
+      _dio.get(ApiConstants.physioPatientAssessments(patientId));
+  Future<Response> createPhysioAssessment(
+    String patientId,
+    Map<String, dynamic> data,
+  ) => _dio.post(ApiConstants.physioPatientAssessments(patientId), data: data);
+  Future<Response> getPhysioAssessment(String id) =>
+      _dio.get(ApiConstants.physioAssessment(id));
+  Future<Response> updatePhysioAssessment(
+    String id,
+    Map<String, dynamic> data,
+  ) => _dio.patch(ApiConstants.physioAssessment(id), data: data);
+  Future<Response> getPhysioPatientProgress(String patientId) =>
+      _dio.get(ApiConstants.physioPatientProgress(patientId));
+
   // PATHOLOGY COMPATIBILITY
   Future<Response> getPathologyProfile() =>
       _dio.get(ApiConstants.pathologyProfile);
@@ -268,24 +365,62 @@ class ApiService {
     String id,
     String status, {
     String? note,
+    Map<String, dynamic>? extra,
   }) => _dio.post(
     ApiConstants.diagnosticsCollectionStatus(id),
     data: {
       'status': status,
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      ...?extra,
     },
   );
   Future<Response> updateDiagnosticsOrderStatus(
     String id,
     String status, {
     String? reason,
+    Map<String, dynamic>? extra,
   }) => _dio.post(
     ApiConstants.diagnosticsOrderStatus(id),
     data: {
       'status': status,
       if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      ...?extra,
     },
   );
+  Future<Response> saveDiagnosticsResults(
+    String id,
+    Map<String, dynamic> data,
+  ) => _dio.post(ApiConstants.diagnosticsResults(id), data: data);
+  Future<Response> releaseDiagnosticsReport(String id, {String? signedBy}) =>
+      _dio.post(
+        ApiConstants.diagnosticsRelease(id),
+        data: {
+          if (signedBy != null && signedBy.trim().isNotEmpty)
+            'signedBy': signedBy.trim(),
+        },
+      );
+  Future<Response<List<int>>> downloadDiagnosticsReport(String id) =>
+      _dio.get<List<int>>(
+        ApiConstants.diagnosticsReportFile(id),
+        options: Options(responseType: ResponseType.bytes),
+      );
+  Future<Response> getDiagnosticsEarnings(String range) => _dio.get(
+    ApiConstants.diagnosticsEarnings,
+    queryParameters: {'range': range},
+  );
+  Future<Response> getDiagnosticsSchedule() =>
+      _dio.get(ApiConstants.diagnosticsSchedule);
+  Future<Response> saveDiagnosticsSchedule(List<Map<String, dynamic>> days) =>
+      _dio.put(ApiConstants.diagnosticsSchedule, data: {'days': days});
+  Future<Response> setDiagnosticsHoliday(String date, {required bool closed}) =>
+      _dio.post(
+        ApiConstants.diagnosticsHolidays,
+        data: {'date': date, 'closed': closed},
+      );
+  Future<Response> getDiagnosticsLibrary() =>
+      _dio.get(ApiConstants.diagnosticsLibrary);
+  Future<Response> importDiagnosticsLibrary(List<Map<String, dynamic>> items) =>
+      _dio.post(ApiConstants.diagnosticsImport, data: {'items': items});
   Future<Response> recordDiagnosticsOfflinePayment(
     String id, {
     required num amount,
@@ -451,6 +586,12 @@ class ApiService {
       _dio.get(ApiConstants.lowStockMedicines);
   Future<Response> getExpiringMedicines() =>
       _dio.get(ApiConstants.expiringMedicines);
+  Future<Response> getExpiredMedicines() =>
+      _dio.get(ApiConstants.expiredMedicines);
+
+  /// The branch's medicine with exactly this barcode; 404 when none.
+  Future<Response> getMedicineByBarcode(String code) =>
+      _dio.get(ApiConstants.medicineByBarcode(code));
 
   Future<Response<List<int>>> downloadMedicineBulkUploadTemplate() =>
       _dio.get<List<int>>(
@@ -572,17 +713,46 @@ class ApiService {
 
   Future<Response> getMerchantOrder(String id) =>
       _dio.get(ApiConstants.merchantOrder(id));
+
+  /// [checklist] is what the pharmacist verified (see
+  /// showPrescriptionChecklist); required by the server for approvals.
   Future<Response> reviewMerchantPrescription(
     String id, {
     required bool approved,
     String? reason,
+    Map<String, dynamic>? checklist,
   }) => _dio.post(
     ApiConstants.merchantPrescriptionReview(id),
     data: {
       'decision': approved ? 'approved' : 'rejected',
       if (reason != null && reason.trim().isNotEmpty) 'notes': reason.trim(),
+      if (checklist != null) 'checklist': checklist,
     },
   );
+
+  /// The customer's bill (after acceptance) or the packing slip, as PDF bytes.
+  Future<Response<List<int>>> downloadMerchantOrderPdf(
+    String id, {
+    bool packingSlip = false,
+  }) => _dio.get<List<int>>(
+    packingSlip
+        ? ApiConstants.merchantOrderPackingSlipPdf(id)
+        : ApiConstants.merchantOrderInvoicePdf(id),
+    options: Options(responseType: ResponseType.bytes),
+  );
+
+  /// Same-salt medicines in stock at this store, per order line.
+  Future<Response> getOrderSubstitutes(String id, {String? medicineId}) =>
+      _dio.get(
+        ApiConstants.merchantOrderSubstitutes(id),
+        queryParameters: {if (medicineId != null) 'medicineId': medicineId},
+      );
+
+  Future<Response> getScheduleRegister({Map<String, dynamic>? queryParams}) =>
+      _dio.get(
+        ApiConstants.merchantScheduleRegister,
+        queryParameters: queryParams,
+      );
 
   /// Accepts an order. [availability] maps order-item id -> the quantity the
   /// store can actually supply; omit it to accept everything as ordered.
@@ -594,17 +764,24 @@ class ApiService {
     ApiConstants.merchantConfirmOrder(id),
     data: {if (availability != null) 'availability': availability},
   );
+
+  /// [extra] carries what a step needs — `driver` for a handover.
   Future<Response> updateMerchantOrderStatus(
     String id,
     String status, {
     String? reason,
+    Map<String, dynamic>? extra,
   }) => _dio.post(
     ApiConstants.merchantOrderStatus(id),
     data: {
+      ...?extra,
       'status': status,
       if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
     },
   );
+
+  /// Drivers this store handed orders to recently, newest first.
+  Future<Response> getRecentDrivers() => _dio.get(ApiConstants.merchantDrivers);
   Future<Response> cancelMerchantOrder(String id, {String? reason}) =>
       _dio.post(
         ApiConstants.merchantCancelOrder(id),
@@ -621,6 +798,8 @@ class ApiService {
       _dio.post(ApiConstants.merchantCoupons, data: data);
   Future<Response> updateMerchantCoupon(String id, Map<String, dynamic> data) =>
       _dio.patch(ApiConstants.merchantCoupon(id), data: data);
+  Future<Response> getMerchantSettings() =>
+      _dio.get(ApiConstants.merchantSettings);
   Future<Response> updateMerchantSettings(Map<String, dynamic> data) =>
       _dio.patch(ApiConstants.merchantSettings, data: data);
 

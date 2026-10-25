@@ -40,7 +40,7 @@ class NotificationBell extends ConsumerWidget {
         onTap: () async {
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => const ProfessionalNotificationScreen(),
+              builder: (_) => ProfessionalNotificationScreen(accent: accent),
             ),
           );
           ref
@@ -76,7 +76,7 @@ class NotificationBell extends ConsumerWidget {
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         height: 1.35,
                         fontWeight: FontWeight.w700,
                       ),

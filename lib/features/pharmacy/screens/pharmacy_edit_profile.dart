@@ -7,6 +7,7 @@ import '../../../core/network/api_service.dart';
 import '../../auth/models/user_model.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/pharmacy_store_provider.dart';
+import '../providers/pharmacy_profile_provider.dart';
 import '../theme/pharmacy_colors.dart';
 import '../theme/pharmacy_type.dart';
 import '../widgets/pharmacy_ui.dart';
@@ -60,7 +61,23 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     for (final c in _all) {
       c.addListener(_onChanged);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _prefill());
+    final storeState = ref.read(pharmacyStoreProvider);
+    final store = storeState.selectedStore ?? const <String, dynamic>{};
+    _storeId = store['_id']?.toString();
+    _isDefaultBranch =
+        store['isDefault'] == true || storeState.stores.length <= 1;
+
+    final cachedProfile = ref.read(pharmacyProfileProvider).profile;
+    if (cachedProfile.isNotEmpty || store.isNotEmpty) {
+      _applyData(cachedProfile, store);
+      _loading = false;
+      _initial = _snapshot();
+      if (_isDefaultBranch) {
+        ref.read(pharmacyProfileProvider.notifier).loadProfile(silent: true);
+      }
+    } else {
+      _prefill();
+    }
   }
 
   @override
@@ -76,38 +93,12 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _prefill() async {
-    final state = ref.read(pharmacyStoreProvider);
-    final store = state.selectedStore ?? const <String, dynamic>{};
-    final storeAddress = Map<String, dynamic>.from(
-      (store['address'] as Map?) ?? const {},
-    );
-
-    _storeId = store['_id']?.toString();
-    _isDefaultBranch = store['isDefault'] == true || state.stores.length <= 1;
-
-    // The registration record, for the fields it owns and — the reason this
-    // request exists — for `verificationStatus`. The signed-in user's record
-    // carries `isVerified`/`status`, which is about the *account*, not about
-    // whether this pharmacy passed verification; reading the lock off that was
-    // why nothing ever locked.
-    Map<String, dynamic> profile = const {};
-    if (_isDefaultBranch) {
-      try {
-        final response = await ApiService().getPharmacyProfile();
-        final body = response.data;
-        final raw = body is Map
-            ? (body['pharmacy'] ?? body['profile'] ?? body['data'])
-            : null;
-        if (raw is Map) profile = Map<String, dynamic>.from(raw);
-      } catch (_) {
-        // A failed lookup must not silently unlock the form. The save is
-        // still enforced server-side, and the fallback below keeps whatever
-        // the account record claims.
-      }
-    }
+  void _applyData(Map<String, dynamic> profile, Map<String, dynamic> store) {
     final profileAddress = Map<String, dynamic>.from(
       (profile['address'] as Map?) ?? const {},
+    );
+    final storeAddress = Map<String, dynamic>.from(
+      (store['address'] as Map?) ?? const {},
     );
 
     String pick(String profileKey, String storeKey, [String? addressKey]) {
@@ -121,14 +112,11 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
       return '${store[storeKey] ?? ''}'.trim();
     }
 
-    if (!mounted) return;
     _verificationStatus = profile['verificationStatus']?.toString();
-
     _name.text = pick('pharmacyName', 'name');
     _contactPerson.text = pick('contactPerson', 'contactPerson');
     _phone.text = pick('phone', 'phone');
     _email.text = pick('email', 'email');
-    // gstin and drugLicenseNumber live only on the branch record.
     _licence.text =
         '${store['drugLicenseNumber'] ?? store['licenseNumber'] ?? profile['licenseNumber'] ?? ''}';
     _gstin.text = '${store['gstin'] ?? ''}';
@@ -136,7 +124,31 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     _city.text = pick('', '', 'city');
     _state.text = pick('', '', 'state');
     _pincode.text = pick('', '', 'pincode');
+  }
 
+  Future<void> _prefill() async {
+    final state = ref.read(pharmacyStoreProvider);
+    final store = state.selectedStore ?? const <String, dynamic>{};
+    _storeId = store['_id']?.toString();
+    _isDefaultBranch = store['isDefault'] == true || state.stores.length <= 1;
+
+    Map<String, dynamic> profile = ref.read(pharmacyProfileProvider).profile;
+    if (_isDefaultBranch && profile.isEmpty) {
+      try {
+        final response = await ApiService().getPharmacyProfile();
+        final body = response.data;
+        final raw = body is Map
+            ? (body['pharmacy'] ?? body['profile'] ?? body['data'])
+            : null;
+        if (raw is Map) {
+          profile = Map<String, dynamic>.from(raw);
+          ref.read(pharmacyProfileProvider.notifier).updateProfile(profile);
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    _applyData(profile, store);
     setState(() {
       _initial = _snapshot();
       _loading = false;
@@ -276,6 +288,17 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
         });
       }
 
+      ref.read(pharmacyProfileProvider.notifier).updateProfile({
+        'pharmacyName': _name.text.trim(),
+        'contactPerson': _contactPerson.text.trim(),
+        'phone': _phone.text.trim(),
+        'email': _email.text.trim(),
+        if (licence.isNotEmpty) 'licenseNumber': licence,
+        if (licence.isNotEmpty) 'drugLicenseNumber': licence,
+        'gstin': gstin,
+        'address': address,
+      });
+      ref.read(pharmacyProfileProvider.notifier).loadProfile(silent: true);
       await ref.read(pharmacyStoreProvider.notifier).refresh();
       if (!mounted) return;
       setState(() => _saving = false);
@@ -304,7 +327,7 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
@@ -343,9 +366,9 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
           surfaceTintColor: Colors.transparent,
           iconTheme: const IconThemeData(color: PharmacyColors.textPrimary),
           title: Text(
-            'Edit Profile',
+            'Edit profile',
             style: PharmacyType.sans(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w700,
               color: PharmacyColors.textPrimary,
             ),
@@ -508,10 +531,10 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     padding: const EdgeInsets.only(bottom: 18),
     child: Container(
       padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+      // Minimal: notices are grey panels; only the icon carries the tone.
       decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: edge),
+        color: PharmacyColors.panel,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -554,8 +577,10 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
         const SizedBox(height: 5),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          // Locked: white with a hairline, so it reads as read-only next to
+          // the grey editable fields.
           decoration: BoxDecoration(
-            color: PharmacyColors.bgSecondary,
+            color: PharmacyColors.bg,
             borderRadius: BorderRadius.circular(PharmacyColors.radiusInput),
             border: Border.all(color: PharmacyColors.borderStrong),
           ),
@@ -569,7 +594,7 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: PharmacyType.sans(
-                    fontSize: 13.5,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: value.trim().isEmpty
                         ? PharmacyColors.textTertiary
@@ -600,7 +625,11 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     int maxLines = 1,
     String? hint,
   }) {
-    final field = PharmacyTextField(
+    // GSTINs are stored uppercase server-side; uppercasing as you type avoids
+    // a value that changes the moment you save it. Done with an input
+    // formatter — the previous version rewrote the controller from inside a
+    // build, which notified this screen's listener mid-build.
+    return PharmacyTextField(
       label: label,
       controller: controller,
       icon: icon,
@@ -610,24 +639,10 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
       hint: hint,
       dense: true,
       margin: const EdgeInsets.only(bottom: 10),
-    );
-    if (!caps) return field;
-    // GSTINs are stored uppercase server-side; echoing that back as you type
-    // avoids a value that changes the moment you save it.
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (_, value, child) {
-        final upper = value.text.toUpperCase();
-        if (upper != value.text) {
-          controller.value = value.copyWith(
-            text: upper,
-            selection: value.selection,
-            composing: TextRange.empty,
-          );
-        }
-        return child!;
-      },
-      child: field,
+      textCapitalization: caps
+          ? TextCapitalization.characters
+          : TextCapitalization.none,
+      inputFormatters: caps ? const [PharmacyUpperCaseFormatter()] : null,
     );
   }
 
@@ -655,7 +670,7 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
               child: Text(
                 'Unsaved changes',
                 style: PharmacyType.sans(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: PharmacyColors.textSecondary,
                 ),
@@ -676,16 +691,5 @@ class _PharmacyEditProfileState extends ConsumerState<PharmacyEditProfile> {
     );
   }
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 }

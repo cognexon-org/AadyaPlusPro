@@ -98,7 +98,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
             Text(
               _billNumber(),
               style: PharmacyType.sans(
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: PharmacyColors.textStrong,
               ),
@@ -202,7 +202,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                     Text(
                       returned > 0 ? 'NET OF RETURNS' : 'BILL TOTAL',
                       style: PharmacyType.sans(
-                        fontSize: 9,
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 1.4,
                         color: PharmacyColors.greenDark,
@@ -216,7 +216,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                         _rupees(net),
                         maxLines: 1,
                         style: PharmacyType.number(
-                          fontSize: 26,
+                          fontSize: 20,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.8,
                           height: 1,
@@ -274,7 +274,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
       Text(
         label,
         style: PharmacyType.sans(
-          fontSize: 10,
+          fontSize: 10.5,
           color: PharmacyColors.textSecondary,
         ),
       ),
@@ -282,7 +282,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
       Text(
         value,
         style: PharmacyType.number(
-          fontSize: 13,
+          fontSize: 12.5,
           fontWeight: FontWeight.w700,
           color: tone ?? PharmacyColors.textStrong,
         ),
@@ -319,7 +319,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
               child: Text(
                 display[0].toUpperCase(),
                 style: PharmacyType.sans(
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.greenDark,
                 ),
@@ -335,7 +335,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: PharmacyType.sans(
-                      fontSize: 14.5,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: PharmacyColors.textStrong,
                     ),
@@ -345,7 +345,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                     Text(
                       phone,
                       style: PharmacyType.number(
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         color: PharmacyColors.textSecondary,
                       ),
                     ),
@@ -431,7 +431,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
           child: Text(
             'No line items recorded on this bill',
             style: PharmacyType.sans(
-              fontSize: 12.5,
+              fontSize: 11.5,
               color: PharmacyColors.textTertiary,
             ),
           ),
@@ -494,7 +494,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: PharmacyType.sans(
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: PharmacyColors.textPrimary,
                   ),
@@ -505,7 +505,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: PharmacyType.sans(
-                    fontSize: 11,
+                    fontSize: 11.5,
                     color: PharmacyColors.textTertiary,
                   ),
                 ),
@@ -533,7 +533,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                           child: Text(
                             b,
                             style: PharmacyType.number(
-                              fontSize: 9.5,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w700,
                               color: PharmacyColors.textSecondary,
                             ),
@@ -560,7 +560,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
           Text(
             _rupees(_num(item['totalAmount'])),
             style: PharmacyType.number(
-              fontSize: 13,
+              fontSize: 12.5,
               fontWeight: FontWeight.w700,
               color: PharmacyColors.textStrong,
             ),
@@ -619,7 +619,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
               child: Text(
                 'Total',
                 style: PharmacyType.sans(
-                  fontSize: 13.5,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.textStrong,
                 ),
@@ -628,7 +628,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
             Text(
               _rupees(total),
               style: PharmacyType.number(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: PharmacyColors.textStrong,
               ),
@@ -666,7 +666,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                     Text(
                       '${r['returnNumber'] ?? 'Return'}',
                       style: PharmacyType.sans(
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w700,
                         color: PharmacyColors.textPrimary,
                       ),
@@ -676,7 +676,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
                       Text(
                         reason,
                         style: PharmacyType.sans(
-                          fontSize: 11,
+                          fontSize: 11.5,
                           color: PharmacyColors.textTertiary,
                         ),
                       ),
@@ -688,7 +688,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
               Text(
                 '−${_rupees(_num(r['refundAmount'] ?? r['totalAmount']))}',
                 style: PharmacyType.number(
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w700,
                   color: PharmacyColors.error,
                 ),
@@ -766,38 +766,17 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
 
   // ────────────────────────── Shared chrome ────────────────────────
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-    child: Text(
-      text,
-      style: PharmacyType.sans(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-        color: PharmacyColors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(String text) => PharmacySectionTitle(text);
 
-  Widget _group(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: PharmacyColors.borderStrong),
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(children: children),
-    ),
-  );
+  Widget _group(List<Widget> children) => PharmacyGroup(children: children);
 
-  static Widget get _hairline =>
-      Container(height: 1, color: PharmacyColors.border);
+  static Widget get _hairline => const PharmacyHairline();
 
   Widget _circleAction(IconData icon, String tooltip, VoidCallback onTap) =>
       Tooltip(
         message: tooltip,
         child: Material(
-          color: PharmacyColors.greenVeryLight,
+          color: PharmacyColors.bg,
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -828,20 +807,21 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: PharmacyType.sans(
-                fontSize: 12.5,
+                fontSize: 11.5,
                 color: PharmacyColors.textSecondary,
               ),
             ),
           ),
           const SizedBox(width: 10),
-          Flexible(
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 190),
             child: Text(
               value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: PharmacyType.number(
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontWeight: FontWeight.w700,
                 color: valueColor ?? PharmacyColors.textStrong,
               ),
@@ -854,9 +834,9 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
         ],
       ),
     );
-    if (onTap == null) return Container(color: PharmacyColors.bg, child: row);
+    if (onTap == null) return row;
     return Material(
-      color: PharmacyColors.bg,
+      color: Colors.transparent,
       child: InkWell(onTap: onTap, child: row),
     );
   }
@@ -894,7 +874,7 @@ class _SaleDetailsScreenState extends State<SaleDetailsScreen> {
           message,
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
-          style: PharmacyType.sans(fontSize: 12.5, color: Colors.white),
+          style: PharmacyType.sans(fontSize: 11.5, color: Colors.white),
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
