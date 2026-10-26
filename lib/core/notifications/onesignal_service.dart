@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 
@@ -71,7 +73,7 @@ class OneSignalService {
   Future<void> unbindUser() async {
     if (!isConfigured) return;
     try {
-      await OneSignal.logout();
+      await OneSignal.logout().timeout(const Duration(seconds: 5));
     } catch (error) {
       debugPrint('OneSignal logout failed: $error');
     }

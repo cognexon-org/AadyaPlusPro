@@ -94,11 +94,11 @@ FirebaseOptions? _firebaseOptionsFromEnvironment() {
 Future<void> _ensureFirebaseInitialized() async {
   if (Firebase.apps.isNotEmpty) return;
   final options = _firebaseOptionsFromEnvironment();
-  if (options != null) {
-    await Firebase.initializeApp(options: options);
-  } else {
-    await Firebase.initializeApp();
-  }
+  // Bounded: an unconfigured or unreachable Firebase must fail, not hang.
+  await (options != null
+          ? Firebase.initializeApp(options: options)
+          : Firebase.initializeApp())
+      .timeout(const Duration(seconds: 10));
 }
 
 @pragma('vm:entry-point')
@@ -157,15 +157,8 @@ class ProfessionalPushNotificationService {
       _available = true;
 
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        announcement: false,
-        carPlay: false,
-        criticalAlert: false,
-        provisional: false,
-      );
+      // The permission prompt is not asked here (at launch, before anyone
+      // has signed in) — see [syncAuthenticatedDevice].
       await messaging.setForegroundNotificationPresentationOptions(
         alert: false,
         badge: true,
@@ -196,12 +189,15 @@ class ProfessionalPushNotificationService {
         }
       }
 
-      final initial = await messaging.getInitialMessage();
+      final initial = await messaging.getInitialMessage().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => null,
+      );
       if (initial != null) {
         await openNotificationData(_messageData(initial));
       }
-
-      await syncAuthenticatedDevice();
+      // Token registration happens once someone is signed in: the dashboard
+      // calls [syncAuthenticatedDevice].
     } catch (error) {
       _available = false;
       debugPrint(
@@ -257,7 +253,15 @@ class ProfessionalPushNotificationService {
     if (jwt == null || jwt.isEmpty) return;
 
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      // Asked after sign-in, alongside OneSignal's prompt (it's the same OS
+      // permission, so the user sees it once).
+      await FirebaseMessaging.instance
+          .requestPermission(alert: true, badge: true, sound: true)
+          .timeout(const Duration(seconds: 30));
+      // getToken can wait forever without Play services or a network.
+      final token = await FirebaseMessaging.instance.getToken().timeout(
+        const Duration(seconds: 15),
+      );
       if (token == null || token.isEmpty) return;
       _currentToken = token;
       await _registerToken(token);
@@ -269,10 +273,16 @@ class ProfessionalPushNotificationService {
   Future<void> unregisterAuthenticatedDevice() async {
     if (!_available) return;
     try {
+      // Bounded: signing out must never hang on Firebase or the network.
       final token =
-          _currentToken ?? await FirebaseMessaging.instance.getToken();
+          _currentToken ??
+          await FirebaseMessaging.instance.getToken().timeout(
+            const Duration(seconds: 5),
+          );
       if (token == null || token.isEmpty) return;
-      await _api.unregisterDeviceToken({'token': token, 'app': 'aadyapluspro'});
+      await _api
+          .unregisterDeviceToken({'token': token, 'app': 'aadyapluspro'})
+          .timeout(const Duration(seconds: 8));
     } catch (error) {
       debugPrint('Unable to unregister Aadya Pro push token: $error');
     }

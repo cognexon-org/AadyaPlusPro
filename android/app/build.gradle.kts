@@ -56,6 +56,11 @@ android {
             // Optional but highly recommended: Enable code shrinking
             isMinifyEnabled = true
             isShrinkResources = true
+            // Keep rules for plugins that break under R8 (see the file).
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

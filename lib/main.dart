@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,12 +27,12 @@ Future<void> main() async {
     ),
   );
 
-  // Push initialization is best-effort. A missing Firebase project must never
-  // block doctors, pharmacies, diagnostics teams or field-force users from
-  // opening the app.
-  await ProfessionalPushNotificationService.instance.initialize();
-
+  // Draw first. Push setup (notification channels, Firebase) runs in the
+  // background and is best-effort: it used to be awaited here, before the
+  // first frame, so a slow network, a missing Firebase config or a device
+  // without Play services left release builds on a black screen.
   runApp(const ProviderScope(child: AadyaProfessionalApp()));
+  unawaited(ProfessionalPushNotificationService.instance.initialize());
 }
 
 class AadyaProfessionalApp extends ConsumerWidget {

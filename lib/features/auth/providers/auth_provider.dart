@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
@@ -116,7 +117,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     try {
       state = state.copyWith(isLoading: true);
-      final response = await _api.getCurrentUser();
+      // Bounded so the splash never waits on a slow server: on timeout
+      // the cached account below is used instead.
+      final response = await _api.getCurrentUser().timeout(
+        const Duration(seconds: 10),
+      );
       final data = response.data;
 
       if (data != null &&
@@ -136,8 +141,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
         // Persist user data
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user);
-        await ProfessionalPushNotificationService.instance
-            .syncAuthenticatedDevice();
+        // In the background: opening the app must not wait on push setup.
+        unawaited(
+          ProfessionalPushNotificationService.instance
+              .syncAuthenticatedDevice(),
+        );
         return true;
       }
     } on DioException catch (e) {
@@ -160,8 +168,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
         }
         final user = UserModel.fromJson(Map<String, dynamic>.from(decoded));
         setUser(user);
-        await ProfessionalPushNotificationService.instance
-            .syncAuthenticatedDevice();
+        // In the background: opening the app must not wait on push setup.
+        unawaited(
+          ProfessionalPushNotificationService.instance
+              .syncAuthenticatedDevice(),
+        );
         return true;
       }
     } catch (_) {}
@@ -203,8 +214,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await TokenStorage.saveUserData(jsonEncode(user.toJson()));
 
       setUser(user.copyWith(token: token));
-      await ProfessionalPushNotificationService.instance
-          .syncAuthenticatedDevice();
+      // In the background: signing in must not wait on push setup.
+      unawaited(
+        ProfessionalPushNotificationService.instance.syncAuthenticatedDevice(),
+      );
       return true;
     } on DioException catch (e) {
       final message = _extractErrorMessage(e);
@@ -303,8 +316,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = UserModel.fromJson(rawUser, token: token);
       await TokenStorage.saveUserData(jsonEncode(user.toJson()));
       setUser(user.copyWith(token: token));
-      await ProfessionalPushNotificationService.instance
-          .syncAuthenticatedDevice();
+      // In the background: signing in must not wait on push setup.
+      unawaited(
+        ProfessionalPushNotificationService.instance.syncAuthenticatedDevice(),
+      );
       return (ok: true, registered: true, verificationToken: null, error: null);
     } on DioException catch (e) {
       final message = _extractErrorMessage(e);
@@ -359,8 +374,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
         final user = UserModel.fromLoginResponse(data);
         await TokenStorage.saveUserData(jsonEncode(user.toJson()));
         setUser(user.copyWith(token: token));
-        await ProfessionalPushNotificationService.instance
-            .syncAuthenticatedDevice();
+        // In the background: signing in must not wait on push setup.
+        unawaited(
+          ProfessionalPushNotificationService.instance
+              .syncAuthenticatedDevice(),
+        );
       } else {
         // Registration succeeded but need to login separately
         state = state.copyWith(isLoading: false);
@@ -390,8 +408,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final updatedUser = UserModel.fromJson(userData, token: token);
       await TokenStorage.saveUserData(jsonEncode(updatedUser.toJson()));
       setUser(updatedUser);
-      await ProfessionalPushNotificationService.instance
-          .syncAuthenticatedDevice();
+      // In the background: signing in must not wait on push setup.
+      unawaited(
+        ProfessionalPushNotificationService.instance.syncAuthenticatedDevice(),
+      );
 
       return true;
     } on DioException catch (e) {
@@ -430,7 +450,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await ProfessionalPushNotificationService.instance
         .unregisterAuthenticatedDevice();
     try {
-      await _api.dio.post('/auth/logout');
+      await _api.dio.post('/auth/logout').timeout(const Duration(seconds: 8));
     } catch (_) {
       // Logout endpoint failure shouldn't block local cleanup
     }

@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 class ApiConstants {
   static const String _configuredApiBaseUrl = String.fromEnvironment(
     'AADYA_API_BASE_URL',
@@ -11,19 +9,16 @@ class ApiConstants {
     defaultValue: '',
   );
 
+  /// The production backend, used when no AADYA_API_BASE_URL is passed.
+  ///
+  /// Release builds used to throw here unless the URL was supplied with
+  /// --dart-define, and a store build made without it crashed on launch
+  /// (blank white/black screen). A dart-define still overrides this.
+  static const String defaultApiBaseUrl = 'http://16.176.130.55/api';
+
   static String get baseUrl {
     final configured = _stripTrailingSlash(_configuredApiBaseUrl);
-    if (configured.isNotEmpty) return configured;
-    if (kReleaseMode) {
-      throw StateError(
-        'AADYA_API_BASE_URL is required for release builds. '
-        'Pass --dart-define=AADYA_API_BASE_URL=https://<host>/api',
-      );
-    }
-    // Local backend for testing — your PC's LAN IP on port 5000. Works from
-    // Android/iOS emulators, physical devices on the same Wi-Fi, and Flutter
-    // web, without needing a different value per target.
-    return 'http://16.176.130.55/api';
+    return configured.isNotEmpty ? configured : defaultApiBaseUrl;
   }
 
   static String get socketBaseUrl {

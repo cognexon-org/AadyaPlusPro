@@ -1,7 +1,7 @@
 name: aadya_plus_professional
 description: "Aadya Plus Professional - Healthcare Professional App"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+4
 
 environment:
   sdk: ^3.11.0
@@ -58,12 +58,16 @@ flutter:
     # of downloading. Licence: assets/google_fonts/OFL.txt.
     - assets/google_fonts/
 
-flutter_icons:
+flutter_launcher_icons:
   android: true
   ios: true # Set to false if you don't want to generate iOS icons right now
   remove_alpha_ios: true
   image_path: "assets/brand/icon.png" # Fallback for older Android versions
 
   # --- Android Adaptive Icon Settings ---
-  adaptive_icon_background: "#FFFFFF" # Replace with your desired background Hex color
-  adaptive_icon_foreground: "assets/brand/icon.png" # Your transparent logo
+  # The logo's own near-white background, so there's no seam behind it.
+  adaptive_icon_background: "#FDFEFE"
+  adaptive_icon_foreground: "assets/brand/icon.png"
+  # Launchers crop adaptive icons to the middle ~66%; the inset shrinks the
+  # artwork into that safe zone so the cross and ribbons aren't cut off.
+  adaptive_icon_foreground_inset: 16

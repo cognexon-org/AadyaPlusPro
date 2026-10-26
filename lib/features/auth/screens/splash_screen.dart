@@ -153,8 +153,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
+                                    // The logo fills its square; shown
+                                    // as is, on its own white tile.
                                     Transform.scale(
-                                      scale: 1.5,
+                                      scale: 1,
                                       child: Image.asset(
                                         'assets/brand/icon.png',
                                         fit: BoxFit.contain,

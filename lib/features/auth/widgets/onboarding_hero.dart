@@ -305,8 +305,9 @@ class HeroLogo extends StatelessWidget {
           borderRadius: BorderRadius.circular(9),
         ),
         clipBehavior: Clip.antiAlias,
+        // The logo brings its own white square, so it reads as a tile.
         child: Transform.scale(
-          scale: 2,
+          scale: 1,
           child: Image.asset('assets/brand/icon.png', fit: BoxFit.contain),
         ),
       ),

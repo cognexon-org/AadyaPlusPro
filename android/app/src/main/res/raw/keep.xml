@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource shrinking removes resources it can't see referenced from code.
+     Notification icons and sounds are looked up by name at runtime, so keep
+     them explicitly. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@mipmap/ic_launcher,@mipmap/ic_launcher_*,@drawable/*,@raw/*" />
