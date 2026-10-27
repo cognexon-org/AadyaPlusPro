@@ -222,7 +222,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 6),
                   enter(
                     Text(
-                      'Sign in to manage your practice, lab or pharmacy.',
+                      'Sign in to manage your practice, lab, pharmacy or field work.',
                       style: PharmacyType.sans(
                         fontSize: PharmacyType.body,
                         color: PharmacyColors.textSecondary,
@@ -411,8 +411,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
-/// The four roles that can sign up, with how they're described. Shared by
-/// the role step of registration.
+/// The five modules, with how they're described. Shared by the role step
+/// of registration. MR accounts are created by a manager or admin, so that
+/// card points to sign-in instead of the sign-up form.
 typedef ProfessionalRoleInfo = ({
   UserRole role,
   String title,
@@ -444,6 +445,12 @@ const List<ProfessionalRoleInfo> kProfessionalRoles = [
     title: 'Pharmacy',
     subtitle: 'Online orders, stock and billing',
     icon: LucideIcons.pill,
+  ),
+  (
+    role: UserRole.mr,
+    title: 'Medical rep (MR)',
+    subtitle: 'Doctor calls, tour plans, samples and approvals',
+    icon: LucideIcons.briefcaseMedical,
   ),
 ];
 

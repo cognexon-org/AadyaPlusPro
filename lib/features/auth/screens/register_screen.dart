@@ -209,6 +209,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   void _continue() {
+    // Field-force (MR) accounts are provisioned by the company's manager or
+    // admin; there is nothing to fill in here.
+    if (_step == 0 && _role == UserRole.mr) {
+      final nav = Navigator.of(context);
+      nav.canPop() ? nav.pop() : nav.pushReplacementNamed('/login');
+      return;
+    }
     setState(() => _attempted.add(_step));
     if (_errors(_step).isNotEmpty) {
       HapticFeedback.lightImpact();
@@ -432,7 +439,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               ),
                               const SizedBox(width: 5),
                               Text(
-                                'Your role can’t be changed after sign-up',
+                                _role == UserRole.mr
+                                    ? 'Your manager or company admin creates MR accounts'
+                                    : 'Your role can’t be changed after sign-up',
                                 style: PharmacyType.sans(
                                   fontSize: PharmacyType.caption,
                                   color: PharmacyColors.textTertiary,
@@ -450,6 +459,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         child: PharmacyButton(
                           label: last
                               ? 'Create account'
+                              : _step == 0 && _role == UserRole.mr
+                              ? 'I have an MR account · Sign in'
                               : _step == 0 && _role != null
                               ? 'Continue as ${_roleTitle(_role!)}'
                               : 'Continue',

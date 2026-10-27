@@ -286,6 +286,12 @@ class ApiConstants {
   static const mrExpenses = '/mr/expenses';
   static String mrExpenseSubmit(String id) => '/mr/expenses/$id/submit';
   static String mrExpenseReview(String id) => '/mr/expenses/$id/review';
+  static String mrExpensePay(String id) => '/mr/expenses/$id/pay';
+  static String mrExpenseReceipt(String id) => '/mr/expenses/$id/receipt';
+  static const mrLeaves = '/mr/leaves';
+  static String mrLeaveReview(String id) => '/mr/leaves/$id/review';
+  static String mrLeaveCancel(String id) => '/mr/leaves/$id/cancel';
+  static const mrDirectory = '/mr/directory';
   static const mrTargets = '/mr/targets';
   static const mrPob = '/mr/pob';
   static String mrPobStatus(String id) => '/mr/pob/$id/status';

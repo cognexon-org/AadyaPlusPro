@@ -877,16 +877,37 @@ class ApiService {
 
   // P3 MR / FIELD FORCE
   Future<Response> getMrMe() => _dio.get(ApiConstants.mrMe);
+  Future<Response> updateMrMe(Map<String, dynamic> data) =>
+      _dio.patch(ApiConstants.mrMe, data: data);
   Future<Response> getMrDashboard({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrDashboard, queryParameters: queryParams);
   Future<Response> getMrAnalytics({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrAnalytics, queryParameters: queryParams);
   Future<Response> getMrHierarchy() => _dio.get(ApiConstants.mrHierarchy);
-  Future<Response> getMrTeam() => _dio.get(ApiConstants.mrTeam);
+  Future<Response> getMrTeam({bool includeInactive = false}) => _dio.get(
+    ApiConstants.mrTeam,
+    queryParameters: {if (includeInactive) 'includeInactive': 'true'},
+  );
+  Future<Response> createMrTeamUser(Map<String, dynamic> data) =>
+      _dio.post('${ApiConstants.mrTeam}/users', data: data);
+  Future<Response> updateMrTeamMember(String id, Map<String, dynamic> data) =>
+      _dio.patch('${ApiConstants.mrTeam}/$id', data: data);
+  Future<Response> createMrTerritory(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.mrTerritories, data: data);
+  Future<Response> updateMrTerritory(String id, Map<String, dynamic> data) =>
+      _dio.patch('${ApiConstants.mrTerritories}/$id', data: data);
+  Future<Response> createMrDetailing(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.mrDetailing, data: data);
+  Future<Response> updateMrDetailing(String id, Map<String, dynamic> data) =>
+      _dio.patch('${ApiConstants.mrDetailing}/$id', data: data);
   Future<Response> getMrTerritories({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrTerritories, queryParameters: queryParams);
   Future<Response> getMrAccounts({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrAccounts, queryParameters: queryParams);
+  Future<Response> createMrAccount(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.mrAccounts, data: data);
+  Future<Response> updateMrAccount(String id, Map<String, dynamic> data) =>
+      _dio.patch('${ApiConstants.mrAccounts}/$id', data: data);
   Future<Response> getMrVisits({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrVisits, queryParameters: queryParams);
   Future<Response> createMrVisit(Map<String, dynamic> data) =>
@@ -950,6 +971,56 @@ class ApiService {
       if (comment != null && comment.trim().isNotEmpty)
         'comment': comment.trim(),
     },
+  );
+  Future<Response> payMrExpense(String id, {String? reference}) => _dio.post(
+    ApiConstants.mrExpensePay(id),
+    data: {
+      if (reference != null && reference.trim().isNotEmpty)
+        'reference': reference.trim(),
+    },
+  );
+  Future<Response> uploadMrExpenseReceipt(String id, String filePath) async {
+    final ext = filePath.split('.').last.toLowerCase();
+    final type = switch (ext) {
+      'pdf' => 'application/pdf',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    final form = FormData.fromMap({
+      'receipt': await MultipartFile.fromFile(
+        filePath,
+        contentType: DioMediaType.parse(type),
+      ),
+    });
+    return _dio.post(ApiConstants.mrExpenseReceipt(id), data: form);
+  }
+
+  Future<Response> getMrExpenseReceipt(String id) => _dio.get(
+    ApiConstants.mrExpenseReceipt(id),
+    options: Options(responseType: ResponseType.bytes),
+  );
+  Future<Response> getMrLeaves({Map<String, dynamic>? queryParams}) =>
+      _dio.get(ApiConstants.mrLeaves, queryParameters: queryParams);
+  Future<Response> applyMrLeave(Map<String, dynamic> data) =>
+      _dio.post(ApiConstants.mrLeaves, data: data);
+  Future<Response> reviewMrLeave(
+    String id,
+    String decision, {
+    String? comment,
+  }) => _dio.post(
+    ApiConstants.mrLeaveReview(id),
+    data: {
+      'decision': decision,
+      if (comment != null && comment.trim().isNotEmpty)
+        'comment': comment.trim(),
+    },
+  );
+  Future<Response> cancelMrLeave(String id) =>
+      _dio.post(ApiConstants.mrLeaveCancel(id));
+  Future<Response> searchMrDirectory(String kind, String q) => _dio.get(
+    ApiConstants.mrDirectory,
+    queryParameters: {'kind': kind, 'q': q},
   );
   Future<Response> getMrTargets({Map<String, dynamic>? queryParams}) =>
       _dio.get(ApiConstants.mrTargets, queryParameters: queryParams);

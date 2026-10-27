@@ -70,7 +70,7 @@ class _RoleRow extends StatelessWidget {
     UserRole.physiotherapist => 'Sessions, home visits and recovery plans',
     UserRole.pathology => 'Test bookings, sample collection and reports',
     UserRole.pharmacy => 'Online orders, stock and billing',
-    UserRole.mr => 'Doctor visits and field work',
+    UserRole.mr => 'Field force: doctor calls, tour plans and samples',
   };
 
   List<String> get _gets => switch (role) {
@@ -94,7 +94,12 @@ class _RoleRow extends StatelessWidget {
       'Stock, batches and expiry dates',
       'Billing and invoices for walk-in customers',
     ],
-    UserRole.mr => const <String>[],
+    UserRole.mr => const [
+      'Plan and report doctor and chemist calls with GPS check-in',
+      'Tour plans, expenses and leave approved by your manager',
+      'Samples, gifts and e-detailing in your pocket',
+      'Your company sets up your account; just sign in',
+    ],
   };
 
   @override

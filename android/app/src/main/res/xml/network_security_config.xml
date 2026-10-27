@@ -10,7 +10,6 @@
              until it moves to an HTTPS domain; without this entry release
              builds can't reach it at all. -->
         <domain includeSubdomains="false">16.176.130.55</domain>
-        <domain includeSubdomains="false">16.176.130.55</domain>
         <domain includeSubdomains="false">localhost</domain>
         <domain includeSubdomains="false">127.0.0.1</domain>
         <!-- 10.0.2.2 is how the Android emulator reaches the host machine's localhost -->

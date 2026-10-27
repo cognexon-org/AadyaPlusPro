@@ -52,6 +52,9 @@ import '../../doctor/widgets/doctor_ui.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../pharmacy/widgets/pharmacy_ui.dart'
     show PharmacyScrollScope, PharmacyOfflineBanner;
+import '../../mr/providers/mr_provider.dart';
+import '../../pharmacy/widgets/module_accent.dart';
+import '../../mr/screens/mr_accounts.dart';
 import '../../mr/screens/mr_home.dart';
 import '../../mr/screens/mr_calls.dart';
 import '../../mr/screens/mr_work.dart';
@@ -74,6 +77,7 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
   int _currentIndex = 0;
   bool _bannerDismissed = false;
   bool _pharmacyBooted = false;
+  bool _mrBooted = false;
   bool _doctorBooted = false;
   bool _labBooted = false;
   Timer? _notificationTimer;
@@ -199,7 +203,13 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
           PharmacyProfile(),
         ];
       case UserRole.mr:
-        return const [MrHome(), MrCalls(), MrWork(), MrTeam(), MrProfile()];
+        return [
+          const MrHome(),
+          const MrCalls(),
+          const MrWork(),
+          ref.read(mrProvider).isManager ? const MrTeam() : const MrAccountsScreen(asTab: true),
+          const MrProfile(),
+        ];
     }
   }
 
@@ -365,7 +375,7 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
       case UserRole.pharmacy:
         return PharmacyColors.green;
       case UserRole.mr:
-        return AppTheme.primary;
+        return ModuleAccent.mr.color;
     }
   }
 
@@ -554,6 +564,19 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
         ref.read(pharmacyTabRequestProvider.notifier).state = null;
       });
     }
+    if (role == UserRole.mr) {
+      if (!_mrBooted) {
+        _mrBooted = true;
+        Future.microtask(() => ref.read(mrProvider.notifier).ensureLoaded());
+      }
+      // Rebuild the tabs once the profile says whether this is a manager.
+      ref.watch(mrProvider.select((s) => s.isManager));
+      ref.listen<int?>(pharmacyTabRequestProvider, (_, next) {
+        if (next == null) return;
+        _selectTab(next);
+        ref.read(pharmacyTabRequestProvider.notifier).state = null;
+      });
+    }
     if (role == UserRole.pathology) {
       if (!_labBooted) {
         _labBooted = true;
@@ -595,7 +618,8 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
         role == UserRole.pharmacy ||
         role == UserRole.doctor ||
         role == UserRole.physiotherapist ||
-        role == UserRole.pathology;
+        role == UserRole.pathology ||
+        role == UserRole.mr;
     final labWaiting = role == UserRole.pathology
         ? ref.watch(
             labOrdersProvider.select(
@@ -723,6 +747,47 @@ class _DashboardShellState extends ConsumerState<DashboardShell> {
                         'Profile',
                       ),
                     ],
+                  ),
+                ],
+              ),
+            )
+          : role == UserRole.mr
+          ? PharmacyBottomBarReporter(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: ApiService.reachable,
+                    builder: (_, online, _) => AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      child: online
+                          ? const SizedBox(width: double.infinity)
+                          : PharmacyOfflineBanner(
+                              onRetry: () => ref.read(mrProvider.notifier).loadAll(),
+                            ),
+                    ),
+                  ),
+                  Builder(
+                    builder: (_) {
+                      final mr = ref.watch(mrProvider);
+                      final toReport = mr.visits
+                          .where((v) => mr.isMine(v['profileId']) && const {'completed', 'rejected'}.contains(v['status']))
+                          .length;
+                      final pending = (mr.metrics['pendingApprovals'] as num?)?.toInt() ?? 0;
+                      return PharmacyNavBar(
+                        currentIndex: _currentIndex,
+                        onTap: _selectTab,
+                        items: [
+                          const PharmacyNavItem(LucideIcons.house, 'Today'),
+                          PharmacyNavItem(LucideIcons.stethoscope, 'Calls', badge: toReport),
+                          const PharmacyNavItem(LucideIcons.route, 'Plan'),
+                          mr.isManager
+                              ? PharmacyNavItem(LucideIcons.users, 'Team', badge: pending)
+                              : const PharmacyNavItem(LucideIcons.contact, 'Customers'),
+                          const PharmacyNavItem(LucideIcons.circleUserRound, 'Profile'),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),

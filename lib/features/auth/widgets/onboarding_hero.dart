@@ -487,10 +487,20 @@ final List<_Beat> _beats = [
     metric: '₹24.6k sales today',
     spark: [0.35, 0.3, 0.5, 0.62, 0.58, 0.76, 0.86],
   ),
+  (
+    word: 'MR.',
+    color: ModuleAccent.mr.color,
+    role: LucideIcons.briefcaseMedical,
+    icon: LucideIcons.mapPinCheck,
+    title: 'Checked in · Dr. Meera Nair',
+    body: 'CardioCare 10 · 4 samples given',
+    metric: '9 calls today',
+    spark: [0.25, 0.4, 0.38, 0.55, 0.7, 0.72, 0.9],
+  ),
 ];
 
 /// The sign-in hero: "One app for every doctor." with the last word rolling
-/// through the four professions. On each beat the word's colour, the aurora,
+/// through the five modules. On each beat the word's colour, the aurora,
 /// the glass card and its metric all change together — one idea, one rhythm,
 /// with story-style progress bars showing the timing.
 class LoginShowcase extends StatefulWidget {
